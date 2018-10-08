@@ -181,6 +181,32 @@ void StreamServer::ProcessRequest(const jsonrpcpp::request_ptr request, jsonrpcp
 				result["volume"] = clientInfo->config.volume.toJson();
 				notification.reset(new jsonrpcpp::Notification("Client.OnVolumeChanged", jsonrpcpp::Parameter("id", clientInfo->id, "volume", clientInfo->config.volume.toJson())));
 			}
+			else if (request->method() == "Client.IncVolume")
+			{
+				/// Request:      {"id":8,"jsonrpc":"2.0","method":"Client.IncVolume","params":{"id":"00:21:6a:7d:74:fc"}}
+				/// Request:      {"id":8,"jsonrpc":"2.0","method":"Client.IncVolume","params":{"id":"00:21:6a:7d:74:fc","incrementAmount":3}}
+				/// Response:     {"id":8,"jsonrpc":"2.0","result":{"volume":{"muted":false,"percent":74}}}
+				/// Notification: {"jsonrpc":"2.0","method":"Client.OnVolumeChanged","params":{"id":"00:21:6a:7d:74:fc","volume":{"muted":false,"percent":74}}}
+				uint16_t incrementAmount = 1;
+				if (request->params().has("incrementAmount"))
+					incrementAmount = request->params().get("incrementAmount");
+				clientInfo->config.volume.percent += incrementAmount;
+				result["volume"] = clientInfo->config.volume.toJson();
+				notification.reset(new jsonrpcpp::Notification("Client.OnVolumeChanged", jsonrpcpp::Parameter("id", clientInfo->id, "volume", clientInfo->config.volume.toJson())));
+			}
+			else if (request->method() == "Client.DecVolume")
+			{
+				/// Request:      {"id":8,"jsonrpc":"2.0","method":"Client.DecVolume","params":{"id":"00:21:6a:7d:74:fc"}}
+				/// Request:      {"id":8,"jsonrpc":"2.0","method":"Client.DecVolume","params":{"id":"00:21:6a:7d:74:fc","incrementAmount":3}}
+				/// Response:     {"id":8,"jsonrpc":"2.0","result":{"volume":{"muted":false,"percent":74}}}
+				/// Notification: {"jsonrpc":"2.0","method":"Client.OnVolumeChanged","params":{"id":"00:21:6a:7d:74:fc","volume":{"muted":false,"percent":74}}}
+				uint16_t incrementAmount = 1;
+				if (request->params().has("incrementAmount"))
+					incrementAmount = request->params().get("incrementAmount");				
+				clientInfo->config.volume.percent -= incrementAmount;
+				result["volume"] = clientInfo->config.volume.toJson();
+				notification.reset(new jsonrpcpp::Notification("Client.OnVolumeChanged", jsonrpcpp::Parameter("id", clientInfo->id, "volume", clientInfo->config.volume.toJson())));
+			}
 			else if (request->method() == "Client.SetLatency")
 			{
 				/// Request:      {"id":7,"jsonrpc":"2.0","method":"Client.SetLatency","params":{"id":"00:21:6a:7d:74:fc#2","latency":10}}
