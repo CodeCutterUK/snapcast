@@ -234,7 +234,7 @@ void StreamServer::ProcessRequest(const jsonrpcpp::request_ptr request, jsonrpcp
 				throw jsonrpcpp::MethodNotFoundException(request->id());
 
 
-			if (request->method().find("Client.Set") == 0)
+			if (request->method().find("Client.Set") == 0 || request->method().find("Client.Inc") == 0 || request->method().find("Client.Dec") == 0)
 			{
 				/// Update client
 				session_ptr session = getStreamSession(clientInfo->id);
