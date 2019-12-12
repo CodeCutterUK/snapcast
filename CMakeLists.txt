@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.2)
 
-project(snapcast LANGUAGES CXX VERSION 0.15.0)
+project(snapcast LANGUAGES CXX VERSION 0.17.1)
 set(PROJECT_DESCRIPTION "Multi-room client-server audio player")
 set(PROJECT_URL "https://github.com/badaix/snapcast")
 
@@ -10,6 +10,12 @@ option(BUILD_TESTS "Build tests (run tests with make test)" ON)
 
 option(BUILD_SERVER "Build Snapserver" ON)
 option(BUILD_CLIENT "Build Snapclient" ON)
+
+option(BUILD_WITH_FLAC "Build with FLAC support" ON)
+option(BUILD_WITH_VORBIS "Build with VORBIS support" ON)
+option(BUILD_WITH_TREMOR "Build with vorbis using TREMOR" ON)
+option(BUILD_WITH_OPUS "Build with OPUS support" ON)
+option(BUILD_WITH_AVAHI "Build with AVAHI support" ON)
 
 
 if (NOT BUILD_SHARED_LIBS AND NOT BUILD_STATIC_LIBS)
@@ -52,7 +58,6 @@ endif()
 
 set(INCLUDE_DIRS
     "${CMAKE_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/externals/asio/asio/include"
     "${CMAKE_INSTALL_INCLUDEDIR}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
@@ -63,7 +68,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 # Configure compiler options
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 
 # Get arch
 include(${CMAKE_SOURCE_DIR}/cmake/TargetArch.cmake)
@@ -73,11 +78,7 @@ target_architecture(ARCH)
 #message(STATUS "Architecture: ${ARCH}")
 #message(STATUS "System processor: ${CMAKE_SYSTEM_PROCESSOR}")
 
-INCLUDE(CheckLibraryExists)
-check_library_exists(atomic __atomic_fetch_add_4 "" HAS_LIBATOMIC)
-if(HAS_LIBATOMIC)
-    set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -latomic")
-endif()
+include(CheckAtomic)
 
 INCLUDE(TestBigEndian)
 TEST_BIG_ENDIAN(BIGENDIAN)
@@ -99,6 +100,9 @@ if(MACOSX)
     endif (BONJOUR_FOUND)
 
     add_definitions(-DFREEBSD -DHAS_DAEMON)
+    link_directories("/usr/local/lib")
+    list(APPEND INCLUDE_DIRS "/usr/local/include")
+    list(APPEND CMAKE_REQUIRED_INCLUDES "${INCLUDE_DIRS}")
 elseif(ANDROID)
 #    add_definitions("-DNO_CPP11_STRING")
 else()
@@ -109,10 +113,12 @@ else()
         endif (ALSA_FOUND)
     endif()
 
-    pkg_search_module(AVAHI avahi-client)
-    if (AVAHI_FOUND)
-        add_definitions(-DHAS_AVAHI)
-    endif (AVAHI_FOUND)
+    if(BUILD_WITH_AVAHI)
+        pkg_search_module(AVAHI avahi-client)
+        if (AVAHI_FOUND)
+            add_definitions(-DHAS_AVAHI)
+        endif (AVAHI_FOUND)
+    endif(BUILD_WITH_AVAHI)
 
     add_definitions(-DHAS_DAEMON)
 
@@ -126,27 +132,6 @@ endif()
 
 include_directories(${INCLUDE_DIRS})
 
-cmake_push_check_state()
-set (CMAKE_REQUIRED_INCLUDES "${CMAKE_SOURCE_DIR}/externals/asio/asio/include")
-check_include_file_cxx(asio.hpp HAS_ASIO_HPP "-pthread -DASIO_STANDALONE -DASIO_DISABLE_STD_FUTURE -std=c++11")
-cmake_pop_check_state()
-if(HAS_ASIO_HPP)
-    add_definitions("-DHAS_ASIO_HPP -DASIO_STANDALONE")
-else()
-    message(FATAL_ERROR "Need to have asio installed")
-endif()
-
-list(APPEND CMAKE_REQUIRED_INCLUDES "${INCLUDE_DIRS}")
-
-check_include_file_cxx(popl.hpp HAS_POPL_HPP -std=c++11)
-if(NOT HAS_POPL_HPP)
-    message(FATAL_ERROR "Need to have popl installed")
-endif()
-
-check_include_file_cxx(aixlog.hpp HAS_AIXLOG_HPP -std=c++11)
-if(NOT HAS_AIXLOG_HPP)
-    message(FATAL_ERROR "Need to have aixlog installed")
-endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/CheckCXX11StringSupport.cmake)
 CHECK_CXX11_STRING_SUPPORT(HAS_CXX11_STRING_SUPPORT)
@@ -154,31 +139,50 @@ if(NOT HAS_CXX11_STRING_SUPPORT)
     add_definitions("-DNO_CPP11_STRING")
 endif()
 
-pkg_search_module(FLAC flac)
-if (FLAC_FOUND)
-    add_definitions("-DHAS_FLAC")
-endif (FLAC_FOUND)
-
-pkg_search_module(OGG ogg)
-if (OGG_FOUND)
-    add_definitions("-DHAS_OGG")
-endif (OGG_FOUND)
-
-pkg_search_module(VORBIS vorbis)
-if (VORBIS_FOUND)
-    add_definitions("-DHAS_VORBIS")
-endif (VORBIS_FOUND)
-
-pkg_search_module(TREMOR vorbisidec)
-if (TREMOR_FOUND)
-    add_definitions("-DHAS_TREMOR")
-endif (TREMOR_FOUND)
-
-pkg_search_module(VORBISENC vorbisenc)
-if (VORBISENC_FOUND)
-    add_definitions("-DHAS_VORBISENC")
+if(BUILD_WITH_FLAC)
+    pkg_search_module(FLAC flac)
+    if (FLAC_FOUND)
+        add_definitions("-DHAS_FLAC")
+    endif (FLAC_FOUND)
 endif()
 
+if(BUILD_WITH_VORBIS OR BUILD_WITH_TREMOR)
+    pkg_search_module(OGG ogg)
+    if (OGG_FOUND)
+        add_definitions("-DHAS_OGG")
+    endif (OGG_FOUND)
+endif()
+
+if(BUILD_WITH_VORBIS)
+    pkg_search_module(VORBIS vorbis)
+    if (VORBIS_FOUND)
+        add_definitions("-DHAS_VORBIS")
+    endif (VORBIS_FOUND)
+endif()
+
+if(BUILD_WITH_TREMOR)
+    pkg_search_module(TREMOR vorbisidec)
+    if (TREMOR_FOUND)
+        add_definitions("-DHAS_TREMOR")
+    endif (TREMOR_FOUND)
+endif()
+
+if(BUILD_WITH_VORBIS)
+    pkg_search_module(VORBISENC vorbisenc)
+    if (VORBISENC_FOUND)
+        add_definitions("-DHAS_VORBIS_ENC")
+    endif(VORBISENC_FOUND)
+endif()
+
+if(BUILD_WITH_OPUS)
+    pkg_search_module(OPUS opus)
+    if (OPUS_FOUND)
+        add_definitions("-DHAS_OPUS")
+    endif (OPUS_FOUND)
+endif()
+
+find_package(Boost 1.70 REQUIRED)
+add_definitions("-DBOOST_ERROR_CODE_HEADER_ONLY")
 
 add_subdirectory(common)
 

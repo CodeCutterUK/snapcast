@@ -12,12 +12,13 @@ https://travis-ci.org/badaix/snapcast.svg?branch=master)](https://travis-ci.org/
 Snapcast is a multi-room client-server audio player, where all clients are time synchronized with the server to play perfectly synced audio. It's not a standalone player, but an extension that turns your existing audio player into a Sonos-like multi-room solution.
 The server's audio input is a named pipe `/tmp/snapfifo`. All data that is fed into this file will be send to the connected clients. One of the most generic ways to use Snapcast is in conjunction with the music player daemon ([MPD](http://www.musicpd.org/)) or [Mopidy](https://www.mopidy.com/), which can be configured to use a named pipe as audio output.
 
-How does is work
+How does it work
 ----------------
 The Snapserver reads PCM chunks from the pipe `/tmp/snapfifo`. The chunk is encoded and tagged with the local time. Supported codecs are:
 * **PCM** lossless uncompressed
 * **FLAC** lossless compressed [default]
 * **Vorbis** lossy compression
+* **Opus** lossy low-latency compression
 
 The encoded chunk is sent via a TCP connection to the Snapclients.
 Each client does continuos time synchronization with the server, so that the client is always aware of the local server time.
@@ -42,8 +43,8 @@ Please follow this [guide](doc/build.md) to build Snapcast for
 * [Buildroot](doc/build.md#buildroot-cross-compile)
   * [Raspberry Pi](doc/build.md#raspberry-pi-cross-compile)
 
-### Install debian packages
-Download the debian package for your CPU architecture from the [latest release page](https://github.com/badaix/snapcast/releases/latest), e.g. for Raspberry pi `snapclient_0.x.x_armhf.deb`
+### Install linux packages
+For Debian download the package for your CPU architecture from the [latest release page](https://github.com/badaix/snapcast/releases/latest), e.g. for Raspberry pi `snapclient_0.x.x_armhf.deb`
 Install the package:
 
     $ sudo dpkg -i snapclient_0.x.x_armhf.deb
@@ -56,22 +57,48 @@ On OpenWrt do:
 
     $ opkg install snapclient_0.x.x_ar71xx.ipk
 
-On Alpine Linux (testing repository) do:
+On Alpine Linux do:
 
     $ apk add snapcast
+
+	# Or for just the client:
+
+	$ apk add snapcast-client
+
+	# Or for just the server:
+
+	$ apk add snapcast-server
+
+On Gentoo Linux do:
+
+    $ emerge --ask media-sound/snapcast
+
+On Archlinux, snapcast is available through the AUR.  To install, use your favorite AUR helper, or do:
+
+    $ git clone https://aur.archlinux.org/snapcast
+    $ cd snapcast
+    $ makepkg -si
+
+SnapOS
+------
+For the brave of you, there is a guide with buildfiles available to build [SnapOS](https://github.com/badaix/snapos), a small and fast-booting OS to run Snapcast, comming in two flavors: [Buildroot](https://github.com/badaix/snapos/blob/master/buildroot-external/README.md) based, or [OpenWrt](https://github.com/badaix/snapos/tree/master/openwrt) based. Please note that there are no pre-build firmware packages available.
 
 Configuration
 -------------
 After installation, Snapserver and Snapclient are started with the command line arguments that are configured in `/etc/default/snapserver` and `/etc/default/snapclient`.
 Allowed options are listed in the man pages (`man snapserver`, `man snapclient`) or by invoking the snapserver or snapclient with the `-h` option.
 
-Different streams can by configured with a list of `-s` options, e.g.:
+The server configuration is done in `/etc/snapserver.conf`. Different streams can by configured in the `[stream]` section with a list of `stream` options, e.g.:
 
-    SNAPSERVER_OPTS="-d -s pipe:///tmp/snapfifo?name=Radio&sampleformat=48000:16:2&codec=flac -s file:///home/user/Musik/Some%20wave%20file.wav?name=File"
+```
+[stream]
+stream = pipe:///tmp/snapfifo?name=Radio&sampleformat=48000:16:2&codec=flac
+stream = file:///home/user/Musik/Some%20wave%20file.wav?name=File
+```
 
-The pipe stream (`-s pipe`) will per default create the pipe. Sometimes your audio source might insist in creating the pipe itself. So the pipe creation mode can by changed to "not create, but only read mode", using the `mode` option set to `create` or `read`:
+The pipe stream (`stream = pipe`) will per default create the pipe. Sometimes your audio source might insist in creating the pipe itself. So the pipe creation mode can by changed to "not create, but only read mode", using the `mode` option set to `create` or `read`:
     
-    SNAPSERVER_OPTS="-d -s pipe:///tmp/snapfifo?name=Radio&mode=read"
+    stream = pipe:///tmp/snapfifo?name=Radio&mode=read"
     
 Test
 ----
@@ -80,9 +107,12 @@ You can test your installation by copying random data into the server's fifo fil
     $ sudo cat /dev/urandom > /tmp/snapfifo
 
 All connected clients should play random noise now. You might raise the client's volume with "alsamixer".
-It's also possible to let the server play a wave file. Simply configure a `file` stream in `/etc/default/snapserver`, and restart the server:
+It's also possible to let the server play a wave file. Simply configure a `file` stream in `/etc/snapserver.conf`, and restart the server:
 
-    SNAPSERVER_OPTS="-d -s file:///home/user/Musik/Some%20wave%20file.wav?name=test"
+```
+[stream]
+stream = file:///home/user/Musik/Some%20wave%20file.wav?name=test
+```
 
 When you are using a Raspberry pi, you might have to change your audio output to the 3.5mm jack:
 
@@ -101,7 +131,7 @@ Snapcast can be controlled using a [JSON-RPC API](doc/json_rpc_api/v2_0_0.md):
 * Assign a client to a stream
 * ...
 
-There is an Android client [snapdroid](https://github.com/badaix/snapdroid) available in [Releases](https://github.com/badaix/snapdroid/releases/latest) 
+There is an Android client [snapdroid](https://github.com/badaix/snapdroid) available in [Releases](https://github.com/badaix/snapdroid/releases/latest) and on [Google Play](https://play.google.com/store/apps/details?id=de.badaix.snapcast)
 
 ![Snapcast for Android](https://raw.githubusercontent.com/badaix/snapcast/master/doc/snapcast_android_scaled.png)
 
@@ -116,6 +146,8 @@ There is a [snapcast component for Home Assistant](https://home-assistant.io/com
 For a webinterface in python, see [snapcastr](https://github.com/xkonni/snapcastr), based on [python-snapcast](https://github.com/happyleavesaoc/python-snapcast). This interface controls client volume and assigns streams to groups.
 
 Another webinterface running on any device, see [snapcast-websockets-ui](https://github.com/derglaus/snapcast-websockets-ui), running entirely in the browser, needs [websockify](https://github.com/novnc/websockify). No configuration needed, features almost all functions, still needs some tuning for the optics.
+
+A webinterface called [HydraPlay](https://github.com/mariolukas/HydraPlay) which integrates Snapcast and multiple Mopidy instances. It is JavaScript based and uses Angular 7. A Snapcast websocket proxy server is needed to connect Snapcast to HydraPlay over web sockets.
 
 Setup of audio players/server
 -----------------------------
