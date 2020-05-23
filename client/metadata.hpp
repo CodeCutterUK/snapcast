@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -44,24 +44,24 @@ public:
 
     void reset()
     {
-        msg_.reset(new json);
+        msg_ = json{};
     }
 
     std::string serialize()
     {
-        return METADATA + ":" + msg_->dump();
+        return METADATA + ":" + msg_.dump();
     }
 
-    void tag(std::string name, std::string value)
+    void tag(const std::string& name, const std::string& value)
     {
-        (*msg_)[name] = value;
+        msg_[name] = value;
     }
 
-    std::string operator[](std::string key)
+    std::string operator[](const std::string& key)
     {
         try
         {
-            return (*msg_)[key];
+            return msg_[key];
         }
         catch (std::domain_error&)
         {
@@ -75,14 +75,14 @@ public:
         return 0;
     }
 
-    int push(json& jtag)
+    int push(const json& jtag)
     {
-        msg_.reset(new json(jtag));
+        msg_ = jtag;
         return push();
     }
 
 protected:
-    std::shared_ptr<json> msg_;
+    json msg_;
 };
 
 /*

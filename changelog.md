@@ -1,5 +1,69 @@
 # Snapcast changelog
 
+## Version 0.19.0
+
+### Features
+
+- Option to not kill all running librespot instances (PR #539)
+- Add Airplay cover art to metadata (PR #543)
+- Anroid: add support for Oboe audio backend
+- Server: configurable PID file (Issue #554)
+- Server: configurable persistant storage directory (Issue #554)
+- Server: config file options can be overwritten on command line
+- Client: PCM stream can be resampled using the "--sampleformat" option
+- Librespot: add option "autoplay=[false|true]"
+
+### Bugfixes
+
+- Fix Airplay metadata, port selection and device names (PR #537)
+- Fix cmake build when libatomic is needed (PR #540)
+- Control: fix random crash (PR #543)
+
+### General
+
+- ALSA: improved latency estimation for better sync
+- Improved audio synchronization
+- Faster initial sync after client start and reconnect
+- Less playback tempo adaptions and jitter (Issue #525)
+- Playback is robust against system time changes (Issue #522)
+- Less "resyncs" in stream reader that were causing audio dropouts
+- Control: quicker response to group volume changes
+- Server uses less memory when sending PCM data to a stalled connection
+
+_Johannes Pohl <snapcast@badaix.de>  Sat, 14 Mar 2020 00:13:37 +0200_
+
+## Version 0.18.1
+
+### Bugfixes
+
+- Fix random server crash or deadlock during stream client disconnect
+- Fix random server crash or deadlock during control client disconnect
+- Fix airplay stream buffer allocation (PR #536)
+
+_Johannes Pohl <snapcast@badaix.de>  Tue, 28 Jan 2020 00:13:37 +0200_
+
+## Version 0.18.0
+
+### Features
+
+- Add TCP stream reader
+- Configurable number of server worker threads
+
+### Bugfixes
+
+- Client: fix hostname reporting on Android
+- Fix some small memory leaks
+- Fix Librespot stream causing zombie processes (Issue #530)
+- Process stream watchdog is configurable (Issue #517)
+- Fix Makefile for macOS (Issues #510, #514)
+
+### General
+
+- Refactored stream readers
+- Server can run on a single thread
+
+_Johannes Pohl <snapcast@badaix.de>  Wed, 22 Jan 2020 00:13:37 +0200_
+
 ## Version 0.17.1
 
 ### Bugfixes
@@ -84,6 +148,7 @@ _Johannes Pohl <snapcast@badaix.de>  Sat, 07 Jul 2018 00:13:37 +0200_
 ### Features
 
 - Snapserver supports IPv4v6 dual stack and IPv4 + IPv6
+
 ### Bugfixes
 
 - cmake: fix check for big endian (Issue #367)
@@ -156,7 +221,7 @@ _Johannes Pohl <snapcast@badaix.de>  Tue, 17 Oct 2017 00:13:37 +0200_
 
 ## Version 0.11.1
 
-### Features
+### Bugfixes
 
 - Snapserver produces high CPU load on some systems (Issue #174)
 - Snapserver compile error on FreeBSD
@@ -225,8 +290,8 @@ _Johannes Pohl <snapcast@badaix.de>  Sat, 04 Mar 2017 00:13:37 +0200_
 
 ### Features
 
-- Added support [process](https://github.com/badaix/snapcast/blob/master/doc/player_setup.md#process) streams: 
-  Snapserver starts a process and reads PCM data from stdout 
+- Added support [process](https://github.com/badaix/snapcast/blob/master/doc/player_setup.md#process) streams:  
+  Snapserver starts a process and reads PCM data from stdout
 - Specialized versions for [Spotify](https://github.com/badaix/snapcast/blob/master/doc/player_setup.md#spotify) and [AirPlay](https://github.com/badaix/snapcast/blob/master/doc/player_setup.md#airplay)
 
 ### Bugfixes
@@ -256,7 +321,7 @@ _Johannes Pohl <snapcast@badaix.de>  Wed, 16 Nov 2016 00:13:37 +0200_
 
 ### General
 
-- Updated Android NDK to revision 13 
+- Updated Android NDK to revision 13
 
 _Johannes Pohl <snapcast@badaix.de>  Sat, 22 Oct 2016 00:13:37 +0200_
 
@@ -304,7 +369,7 @@ _Johannes Pohl <snapcast@badaix.de>  Sat, 07 May 2016 00:13:37 +0200_
 
 ### General
 
-- Support Tremor, an integer only Ogg-Vorbis implementation 
+- Support Tremor, an integer only Ogg-Vorbis implementation
 - Endian-independent code (Issue #18)
 - Cleaned up build process
 
@@ -409,7 +474,7 @@ _Johannes Pohl <snapcast@badaix.de>  Mon, 28 Dec 2015 12:00:00 +0200_
 
 ### Bugfixes
 
-- Fix synchronization bug in FLAC decoder that could cause audible dropouts 
+- Fix synchronization bug in FLAC decoder that could cause audible dropouts
 
 _Johannes Pohl <snapcast@badaix.de>  Wed, 23 Dec 2015 12:00:00 +0200_
 

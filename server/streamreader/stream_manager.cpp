@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,13 +26,17 @@
 #include "librespot_stream.hpp"
 #include "pipe_stream.hpp"
 #include "process_stream.hpp"
+#include "tcp_stream.hpp"
 
 
 using namespace std;
 
+namespace streamreader
+{
 
-StreamManager::StreamManager(PcmListener* pcmListener, const std::string& defaultSampleFormat, const std::string& defaultCodec, size_t defaultReadBufferMs)
-    : pcmListener_(pcmListener), sampleFormat_(defaultSampleFormat), codec_(defaultCodec), readBufferMs_(defaultReadBufferMs)
+StreamManager::StreamManager(PcmListener* pcmListener, boost::asio::io_context& ioc, const std::string& defaultSampleFormat, const std::string& defaultCodec,
+                             size_t defaultChunkBufferMs)
+    : pcmListener_(pcmListener), sampleFormat_(defaultSampleFormat), codec_(defaultCodec), chunkBufferMs_(defaultChunkBufferMs), ioc_(ioc)
 {
 }
 
@@ -41,14 +45,14 @@ PcmStreamPtr StreamManager::addStream(const std::string& uri)
 {
     StreamUri streamUri(uri);
 
-    if (streamUri.query.find("sampleformat") == streamUri.query.end())
-        streamUri.query["sampleformat"] = sampleFormat_;
+    if (streamUri.query.find(kUriSampleFormat) == streamUri.query.end())
+        streamUri.query[kUriSampleFormat] = sampleFormat_;
 
-    if (streamUri.query.find("codec") == streamUri.query.end())
-        streamUri.query["codec"] = codec_;
+    if (streamUri.query.find(kUriCodec) == streamUri.query.end())
+        streamUri.query[kUriCodec] = codec_;
 
-    if (streamUri.query.find("buffer_ms") == streamUri.query.end())
-        streamUri.query["buffer_ms"] = cpt::to_string(readBufferMs_);
+    if (streamUri.query.find(kUriChunkMs) == streamUri.query.end())
+        streamUri.query[kUriChunkMs] = cpt::to_string(chunkBufferMs_);
 
     //	LOG(DEBUG) << "\nURI: " << streamUri.uri << "\nscheme: " << streamUri.scheme << "\nhost: "
     //		<< streamUri.host << "\npath: " << streamUri.path << "\nfragment: " << streamUri.fragment << "\n";
@@ -59,23 +63,35 @@ PcmStreamPtr StreamManager::addStream(const std::string& uri)
 
     if (streamUri.scheme == "pipe")
     {
-        stream = make_shared<PipeStream>(pcmListener_, streamUri);
+        stream = make_shared<PipeStream>(pcmListener_, ioc_, streamUri);
     }
     else if (streamUri.scheme == "file")
     {
-        stream = make_shared<FileStream>(pcmListener_, streamUri);
+        stream = make_shared<FileStream>(pcmListener_, ioc_, streamUri);
     }
     else if (streamUri.scheme == "process")
     {
-        stream = make_shared<ProcessStream>(pcmListener_, streamUri);
+        stream = make_shared<ProcessStream>(pcmListener_, ioc_, streamUri);
     }
     else if ((streamUri.scheme == "spotify") || (streamUri.scheme == "librespot"))
     {
-        stream = make_shared<LibrespotStream>(pcmListener_, streamUri);
+        // Overwrite sample format here instead of inside the constructor, to make sure
+        // that all constructors of all parent classes also use the overwritten sample
+        // format.
+        streamUri.query[kUriSampleFormat] = "44100:16:2";
+        stream = make_shared<LibrespotStream>(pcmListener_, ioc_, streamUri);
     }
     else if (streamUri.scheme == "airplay")
     {
-        stream = make_shared<AirplayStream>(pcmListener_, streamUri);
+        // Overwrite sample format here instead of inside the constructor, to make sure
+        // that all constructors of all parent classes also use the overwritten sample
+        // format.
+        streamUri.query[kUriSampleFormat] = "44100:16:2";
+        stream = make_shared<AirplayStream>(pcmListener_, ioc_, streamUri);
+    }
+    else if (streamUri.scheme == "tcp")
+    {
+        stream = make_shared<TcpStream>(pcmListener_, ioc_, streamUri);
     }
     else
     {
@@ -84,7 +100,7 @@ PcmStreamPtr StreamManager::addStream(const std::string& uri)
 
     if (stream)
     {
-        for (auto s : streams_)
+        for (const auto& s : streams_)
         {
             if (s->getName() == stream->getName())
                 throw SnapException("Stream with name \"" + stream->getName() + "\" already exists");
@@ -135,15 +151,16 @@ const PcmStreamPtr StreamManager::getStream(const std::string& id)
 
 void StreamManager::start()
 {
-    for (auto stream : streams_)
+    for (const auto& stream : streams_)
         stream->start();
 }
 
 
 void StreamManager::stop()
 {
-    for (auto stream : streams_)
-        stream->stop();
+    for (const auto& stream : streams_)
+        if (stream)
+            stream->stop();
 }
 
 
@@ -154,3 +171,5 @@ json StreamManager::toJson() const
         result.push_back(stream->toJson());
     return result;
 }
+
+} // namespace streamreader

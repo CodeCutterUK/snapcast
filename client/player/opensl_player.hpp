@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,8 +16,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifndef OPEN_SL_PLAYER_H
-#define OPEN_SL_PLAYER_H
+#ifndef OPEN_SL_PLAYER_HPP
+#define OPEN_SL_PLAYER_HPP
 
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
@@ -38,8 +38,8 @@ public:
     OpenslPlayer(const PcmDevice& pcmDevice, std::shared_ptr<Stream> stream);
     virtual ~OpenslPlayer();
 
-    virtual void start();
-    virtual void stop();
+    void start() override;
+    void stop() override;
 
     void playerCallback(SLAndroidSimpleBufferQueueItf bq);
 
@@ -47,8 +47,8 @@ protected:
     void initOpensl();
     void uninitOpensl();
 
-    virtual void worker();
-    void throwUnsuccess(const std::string& what, SLresult result);
+    void worker() override;
+    void throwUnsuccess(const std::string& phase, const std::string& what, SLresult result);
     std::string resultToString(SLresult result) const;
 
     // engine interfaces

@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,7 +30,6 @@
 #include <avahi-common/simple-watch.h>
 #include <avahi-common/timeval.h>
 #include <string>
-#include <thread>
 #include <vector>
 
 class PublishAvahi;
@@ -40,7 +39,7 @@ class PublishAvahi;
 class PublishAvahi : public PublishmDNS
 {
 public:
-    PublishAvahi(const std::string& serviceName);
+    PublishAvahi(const std::string& serviceName, boost::asio::io_context& ioc);
     ~PublishAvahi() override;
     void publish(const std::vector<mDNSService>& services) override;
 
@@ -48,11 +47,10 @@ private:
     static void entry_group_callback(AvahiEntryGroup* g, AvahiEntryGroupState state, AVAHI_GCC_UNUSED void* userdata);
     static void client_callback(AvahiClient* c, AvahiClientState state, AVAHI_GCC_UNUSED void* userdata);
     void create_services(AvahiClient* c);
-    void worker();
+    void poll();
     AvahiClient* client_;
-    std::thread pollThread_;
-    std::atomic<bool> active_;
     std::vector<mDNSService> services_;
+    boost::asio::steady_timer timer_;
 };
 
 

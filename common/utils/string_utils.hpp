@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -92,6 +92,22 @@ static std::string uriDecode(const std::string& src)
         }
     }
     return (ret);
+}
+
+
+static void split_left(const std::string& s, char delim, std::string& left, std::string& right)
+{
+    auto pos = s.find(delim);
+    if (pos != std::string::npos)
+    {
+        left = s.substr(0, pos);
+        right = s.substr(pos + 1);
+    }
+    else
+    {
+        left = s;
+        right = "";
+    }
 }
 
 

@@ -1,5 +1,5 @@
 #    This file is part of snapcast
-#   Copyright (C) 2014-2019  Johannes Pohl
+#   Copyright (C) 2014-2020  Johannes Pohl
 #
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-VERSION = 0.17.1-CodeCutterUK.01
+VERSION = 0.19.0-CodeCutterUK-01
 BIN = snapclient
 
 ifeq ($(TARGET), FREEBSD)
@@ -43,7 +43,7 @@ ifneq ($(SANITIZE), )
 endif
 
 CXXFLAGS += $(ADD_CFLAGS) -std=c++14 -Wall -Wextra -Wpedantic -Wno-unused-function -DBOOST_ERROR_CODE_HEADER_ONLY -DHAS_FLAC -DHAS_OGG -DHAS_OPUS -DVERSION=\"$(VERSION)\" -I. -I.. -I../common
-LDFLAGS  += $(ADD_LDFLAGS) -logg -lFLAC -lopus
+LDFLAGS  += $(ADD_LDFLAGS) -logg -lFLAC -lopus -lsoxr
 OBJ       = snapclient.o stream.o client_connection.o time_provider.o player/player.o decoder/pcm_decoder.o decoder/ogg_decoder.o decoder/flac_decoder.o decoder/opus_decoder.o controller.o ../common/sample_format.o
 
 
@@ -58,33 +58,33 @@ endif
 ifeq ($(TARGET), ANDROID)
 
 CXX       = $(PROGRAM_PREFIX)clang++
-CXXFLAGS += -pthread -fPIC -DHAS_TREMOR -DHAS_OPENSL -I$(NDK_DIR)/include
-LDFLAGS   = -L$(NDK_DIR)/lib -pie -lvorbisidec -logg -lFLAC -lOpenSLES -latomic -llog -static-libstdc++
-OBJ      += player/opensl_player.o 
+CXXFLAGS += -pthread -fPIC -DHAS_TREMOR -DHAS_OPENSL -DHAS_OBOE -I$(NDK_DIR)/usr/local/include
+LDFLAGS   = -L$(NDK_DIR)/usr/local/lib -pie -lvorbisidec -logg -lopus -lFLAC -lOpenSLES -loboe -latomic -llog -lsoxr -static-libstdc++
+OBJ      += player/opensl_player.o player/oboe_player.o
 
 else ifeq ($(TARGET), OPENWRT)
 
-CXXFLAGS += -pthread -DNO_CPP11_STRING -DHAS_TREMOR -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON
+CXXFLAGS += -pthread -DNO_CPP11_STRING -DHAS_TREMOR -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON -DHAS_SOXR
 LDFLAGS  += -lasound -lvorbisidec -lavahi-client -lavahi-common -latomic
 OBJ      += ../common/daemon.o player/alsa_player.o browseZeroConf/browse_avahi.o
 
 else ifeq ($(TARGET), BUILDROOT)
 
-CXXFLAGS += -pthread -DNO_CPP11_STRING -DHAS_TREMOR -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON
+CXXFLAGS += -pthread -DNO_CPP11_STRING -DHAS_TREMOR -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON -DHAS_SOXR
 LDFLAGS  += -lasound -lvorbisidec -lavahi-client -lavahi-common -latomic
 OBJ      += ../common/daemon.o player/alsa_player.o browseZeroConf/browse_avahi.o
 
 else ifeq ($(TARGET), MACOS)
 
 CXX       = g++
-CXXFLAGS += -DHAS_COREAUDIO -DHAS_VORBIS -DFREEBSD -DHAS_BONJOUR -DHAS_DAEMON -I/usr/local/include -Wno-unused-local-typedef -Wno-deprecated
+CXXFLAGS += -DHAS_COREAUDIO -DHAS_VORBIS -DFREEBSD -DHAS_BONJOUR -DHAS_DAEMON -DHAS_SOXR -I/usr/local/include -Wno-unused-local-typedef -Wno-deprecated
 LDFLAGS  += -lvorbis -lFLAC -L/usr/local/lib -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework IOKit
 OBJ      += ../common/daemon.o player/coreaudio_player.o browseZeroConf/browse_bonjour.o
 
 else
 
 CXX       = g++
-CXXFLAGS += -pthread -DHAS_VORBIS -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON
+CXXFLAGS += -pthread -DHAS_VORBIS -DHAS_ALSA -DHAS_AVAHI -DHAS_DAEMON -DHAS_SOXR
 LDFLAGS  += -lrt -lasound -lvorbis -lavahi-client -lavahi-common -latomic
 OBJ      += ../common/daemon.o player/alsa_player.o browseZeroConf/browse_avahi.o
 
@@ -106,9 +106,11 @@ ifeq ($(ARCH), x86)
 else ifeq ($(ARCH), mips)
 	$(eval CXXFLAGS:=$(CXXFLAGS) -DIS_BIG_ENDIAN)
 	$(eval PROGRAM_PREFIX:=$(NDK_DIR)/bin/mipsel-linux-android-)
-else
+else ifeq ($(ARCH), arm)
 	$(eval CXXFLAGS:=$(CXXFLAGS) -march=armv7)
 	$(eval PROGRAM_PREFIX:=$(NDK_DIR)/bin/arm-linux-androideabi-)
+else ifeq ($(ARCH), arm64)
+	$(eval PROGRAM_PREFIX:=$(NDK_DIR)/bin/aarch64-linux-android-)
 endif
 endif
 
@@ -130,9 +132,9 @@ else ifeq ($(TARGET), MACOS)
 
 install:
 	echo macOS
-	install --strip -g wheel -o root $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
+	install -s -g wheel -o root $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
 	install -g wheel -o root $(BIN).1 $(TARGET_DIR)/local/share/man/man1/$(BIN).1
-	install -g wheel -o root ../debian/$(BIN).plist /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
+	install -g wheel -o root etc/$(BIN).plist /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
 	launchctl load /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
 
 else
@@ -155,7 +157,7 @@ install:
 endif
 
 installfiles:
-	install --strip -D -g root -o root $(BIN) $(TARGET_DIR)/bin/$(BIN)
+	install -s -D -g root -o root $(BIN) $(TARGET_DIR)/bin/$(BIN)
 	install -D -g root -o root $(BIN).1 $(TARGET_DIR)/share/man/man1/$(BIN).1
 
 installsystemd:

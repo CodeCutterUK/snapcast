@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,20 +23,26 @@
 #include "message/message.hpp"
 #include "message/server_settings.hpp"
 #include "message/stream_tags.hpp"
-#include "player/pcm_device.hpp"
 #include <atomic>
 #include <thread>
 #ifdef HAS_ALSA
 #include "player/alsa_player.hpp"
-#elif HAS_OPENSL
+#endif
+#ifdef HAS_OPENSL
 #include "player/opensl_player.hpp"
-#elif HAS_COREAUDIO
+#endif
+#ifdef HAS_OBOE
+#include "player/oboe_player.hpp"
+#endif
+#ifdef HAS_COREAUDIO
 #include "player/coreaudio_player.hpp"
 #endif
 #include "client_connection.hpp"
+#include "client_settings.hpp"
 #include "metadata.hpp"
 #include "stream.hpp"
 
+using namespace std::chrono_literals;
 
 /// Forwards PCM data to the audio player
 /**
@@ -48,8 +54,9 @@
 class Controller : public MessageReceiver
 {
 public:
-    Controller(const std::string& clientId, size_t instance, std::shared_ptr<MetadataAdapter> meta);
-    void start(const PcmDevice& pcmDevice, const std::string& host, size_t port, int latency);
+    Controller(const ClientSettings& settings, std::unique_ptr<MetadataAdapter> meta);
+    void start();
+    void run();
     void stop();
 
     /// Implementation of MessageReceiver.
@@ -58,30 +65,26 @@ public:
 
     /// Implementation of MessageReceiver.
     /// Used for async exception reporting
-    void onException(ClientConnection* connection, shared_exception_ptr exception) override;
+    void onException(ClientConnection* connection, std::exception_ptr exception) override;
 
 private:
     void worker();
-    bool sendTimeSyncMessage(long after = 1000);
-    std::string hostId_;
+    bool sendTimeSyncMessage(const std::chrono::milliseconds& after = 1000ms);
+    ClientSettings settings_;
     std::string meta_callback_;
-    size_t instance_;
     std::atomic<bool> active_;
     std::thread controllerThread_;
     SampleFormat sampleFormat_;
-    PcmDevice pcmDevice_;
-    int latency_;
     std::unique_ptr<ClientConnection> clientConnection_;
     std::shared_ptr<Stream> stream_;
     std::unique_ptr<decoder::Decoder> decoder_;
     std::unique_ptr<Player> player_;
-    std::shared_ptr<MetadataAdapter> meta_;
-    std::shared_ptr<msg::ServerSettings> serverSettings_;
-    std::shared_ptr<msg::StreamTags> streamTags_;
-    std::shared_ptr<msg::CodecHeader> headerChunk_;
+    std::unique_ptr<MetadataAdapter> meta_;
+    std::unique_ptr<msg::ServerSettings> serverSettings_;
+    std::unique_ptr<msg::CodecHeader> headerChunk_;
     std::mutex receiveMutex_;
 
-    shared_exception_ptr async_exception_;
+    std::exception_ptr async_exception_;
 };
 
 

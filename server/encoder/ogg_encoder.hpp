@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,8 @@ class OggEncoder : public Encoder
 {
 public:
     OggEncoder(const std::string& codecOptions = "");
+    ~OggEncoder() override;
+
     void encode(const msg::PcmChunk* chunk) override;
     std::string getAvailableOptions() const override;
     std::string getDefaultOptions() const override;

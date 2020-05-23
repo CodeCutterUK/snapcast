@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,27 +29,45 @@
 
 namespace chronos
 {
-typedef std::chrono::system_clock clk;
-typedef std::chrono::time_point<clk> time_point_clk;
-typedef std::chrono::seconds sec;
-typedef std::chrono::milliseconds msec;
-typedef std::chrono::microseconds usec;
-typedef std::chrono::nanoseconds nsec;
+using clk = std::chrono::steady_clock;
+using time_point_clk = std::chrono::time_point<clk>;
+using sec = std::chrono::seconds;
+using msec = std::chrono::milliseconds;
+using usec = std::chrono::microseconds;
+using nsec = std::chrono::nanoseconds;
 
 template <class Clock>
 inline static void timeofday(struct timeval* tv)
 {
     auto now = Clock::now();
-    auto millisecs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
-    tv->tv_sec = millisecs.count() / 1000;
-    tv->tv_usec = (millisecs.count() % 1000) * 1000;
+    auto microsecs = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch());
+    tv->tv_sec = microsecs.count() / 1000000;
+    tv->tv_usec = microsecs.count() % 1000000;
+}
+
+inline static void steadytimeofday(struct timeval* tv)
+{
+    timeofday<clk>(tv);
 }
 
 inline static void systemtimeofday(struct timeval* tv)
 {
-    gettimeofday(tv, nullptr);
-    // timeofday<std::chrono::system_clock>(tv);
+    timeofday<std::chrono::system_clock>(tv);
 }
+
+template <class ToDuration>
+inline ToDuration diff(const timeval& tv1, const timeval& tv2)
+{
+    auto sec = tv1.tv_sec - tv2.tv_sec;
+    auto usec = tv1.tv_usec - tv2.tv_usec;
+    while (usec < 0)
+    {
+        sec -= 1;
+        usec += 1000000;
+    }
+    return std::chrono::duration_cast<ToDuration>(std::chrono::seconds(sec) + std::chrono::microseconds(usec));
+}
+
 
 inline static void addUs(timeval& tv, int us)
 {
@@ -71,7 +89,7 @@ inline static long getTickCount()
 #ifdef MACOS
     clock_serv_t cclock;
     mach_timespec_t mts;
-    host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+    host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
     clock_get_time(cclock, &mts);
     mach_port_deallocate(mach_task_self(), cclock);
     return mts.tv_sec * 1000 + mts.tv_nsec / 1000000;
@@ -115,7 +133,7 @@ inline void usleep(const int32_t& microseconds)
         return;
     sleep(usec(microseconds));
 }
-}
+} // namespace chronos
 
 
 #endif

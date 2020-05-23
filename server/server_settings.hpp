@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -46,7 +46,7 @@ struct ServerSettings
         std::string codec{"flac"};
         int32_t bufferMs{1000};
         std::string sampleFormat{"48000:16:2"};
-        size_t streamReadMs{20};
+        size_t streamChunkMs{20};
         bool sendAudioToMutedClients{false};
         std::vector<std::string> bind_to_address{{"0.0.0.0"}};
     };

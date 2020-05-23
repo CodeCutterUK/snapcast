@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,7 +25,6 @@
 #include "common/daemon.hpp"
 #endif
 #include "common/sample_format.hpp"
-#include "common/signal_handler.hpp"
 #include "common/snap_exception.hpp"
 #include "common/time_defs.hpp"
 #include "common/utils/string_utils.hpp"
@@ -58,7 +57,7 @@ int main(int argc, char* argv[])
         std::string config_file = "/etc/snapserver.conf";
 
         OptionParser op("Allowed options");
-        auto helpSwitch = op.add<Switch>("h", "help", "Produce help message");
+        auto helpSwitch = op.add<Switch>("h", "help", "Produce help message, use -hh to show options from config file");
         auto groffSwitch = op.add<Switch, Attribute::hidden>("", "groff", "produce groff message");
         auto versionSwitch = op.add<Switch>("v", "version", "Show version number");
 #ifdef HAS_DAEMON
@@ -76,18 +75,25 @@ int main(int argc, char* argv[])
                                 &settings.logging.debug_logfile);
 
         // stream settings
-        conf.add<Value<size_t>>("p", "stream.port", "Server port", settings.stream.port, &settings.stream.port);
+        conf.add<Value<size_t>>("", "stream.port", "Server port", settings.stream.port, &settings.stream.port);
         auto streamValue = conf.add<Value<string>>(
-            "s", "stream.stream", "URI of the PCM input stream.\nFormat: TYPE://host/path?name=NAME\n[&codec=CODEC]\n[&sampleformat=SAMPLEFORMAT]", pcmStream,
+            "", "stream.stream", "URI of the PCM input stream.\nFormat: TYPE://host/path?name=NAME\n[&codec=CODEC]\n[&sampleformat=SAMPLEFORMAT]", pcmStream,
             &pcmStream);
-        size_t num_threads = 2;
-        conf.add<Value<size_t>>("", "server.threads", "number of server threads", num_threads, &num_threads);
+        int num_threads = -1;
+        conf.add<Value<int>>("", "server.threads", "number of server threads", num_threads, &num_threads);
+        std::string pid_file = "/var/run/snapserver/pid";
+        conf.add<Value<string>>("", "server.pidfile", "pid file when running as daemon", pid_file, &pid_file);
+        std::string data_dir;
+        conf.add<Implicit<string>>("", "server.datadir", "directory where persistent data is stored", data_dir, &data_dir);
 
         conf.add<Value<string>>("", "stream.sampleformat", "Default sample format", settings.stream.sampleFormat, &settings.stream.sampleFormat);
-        conf.add<Value<string>>("c", "stream.codec", "Default transport codec\n(flac|ogg|opus|pcm)[:options]\nType codec:? to get codec specific options",
+        conf.add<Value<string>>("", "stream.codec", "Default transport codec\n(flac|ogg|opus|pcm)[:options]\nType codec:? to get codec specific options",
                                 settings.stream.codec, &settings.stream.codec);
-        conf.add<Value<size_t>>("", "stream.stream_buffer", "Default stream read buffer [ms]", settings.stream.streamReadMs, &settings.stream.streamReadMs);
-        conf.add<Value<int>>("b", "stream.buffer", "Buffer [ms]", settings.stream.bufferMs, &settings.stream.bufferMs);
+        // deprecated: stream_buffer, use chunk_ms instead
+        conf.add<Value<size_t>>("", "stream.stream_buffer", "Default stream read chunk size [ms]", settings.stream.streamChunkMs,
+                                &settings.stream.streamChunkMs);
+        conf.add<Value<size_t>>("", "stream.chunk_ms", "Default stream read chunk size [ms]", settings.stream.streamChunkMs, &settings.stream.streamChunkMs);
+        conf.add<Value<int>>("", "stream.buffer", "Buffer [ms]", settings.stream.bufferMs, &settings.stream.bufferMs);
         conf.add<Value<bool>>("", "stream.send_to_muted", "Send audio to muted clients", settings.stream.sendAudioToMutedClients,
                               &settings.stream.sendAudioToMutedClients);
         auto stream_bind_to_address = conf.add<Value<string>>("", "stream.bind_to_address", "address for the server to listen on",
@@ -98,7 +104,7 @@ int main(int argc, char* argv[])
         conf.add<Value<size_t>>("", "http.port", "which port the server should listen to", settings.http.port, &settings.http.port);
         auto http_bind_to_address = conf.add<Value<string>>("", "http.bind_to_address", "address for the server to listen on",
                                                             settings.http.bind_to_address.front(), &settings.http.bind_to_address[0]);
-        conf.add<Value<string>>("", "http.doc_root", "serve a website from the doc_root location", settings.http.doc_root, &settings.http.doc_root);
+        conf.add<Implicit<string>>("", "http.doc_root", "serve a website from the doc_root location", settings.http.doc_root, &settings.http.doc_root);
 
         // TCP RPC settings
         conf.add<Value<bool>>("", "tcp.enabled", "enable TCP Json RPC)", settings.tcp.enabled, &settings.tcp.enabled);
@@ -106,12 +112,11 @@ int main(int argc, char* argv[])
         auto tcp_bind_to_address = conf.add<Value<string>>("", "tcp.bind_to_address", "address for the server to listen on",
                                                            settings.tcp.bind_to_address.front(), &settings.tcp.bind_to_address[0]);
 
-        // TODO: Should be possible to override settings on command line
-
         try
         {
             op.parse(argc, argv);
             conf.parse(config_file);
+            conf.parse(argc, argv);
             if (tcp_bind_to_address->is_set())
             {
                 settings.tcp.bind_to_address.clear();
@@ -141,7 +146,7 @@ int main(int argc, char* argv[])
         if (versionSwitch->is_set())
         {
             cout << "snapserver v" << VERSION << "\n"
-                 << "Copyright (C) 2014-2019 BadAix (snapcast@badaix.de).\n"
+                 << "Copyright (C) 2014-2020 BadAix (snapcast@badaix.de).\n"
                  << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.\n"
                  << "This is free software: you are free to change and redistribute it.\n"
                  << "There is NO WARRANTY, to the extent permitted by law.\n\n"
@@ -152,6 +157,8 @@ int main(int argc, char* argv[])
         if (helpSwitch->is_set())
         {
             cout << op << "\n";
+            if (helpSwitch->count() > 1)
+                cout << conf << "\n";
             exit(EXIT_SUCCESS);
         }
 
@@ -185,7 +192,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            AixLog::Log::instance().add_logsink<AixLog::SinkCout>(AixLog::Severity::info, AixLog::Type::all, "%Y-%m-%d %H-%M-%S [#severity]");
+            AixLog::Log::instance().add_logsink<AixLog::SinkCout>(AixLog::Severity::info, AixLog::Type::all, "%Y-%m-%d %H-%M-%S [#severity] (#tag_func)");
         }
 
         for (const auto& opt : conf.unknown_options())
@@ -217,9 +224,11 @@ int main(int argc, char* argv[])
                 if (user_group.size() > 1)
                     group = user_group[1];
             }
-
-            Config::instance().init("/var/lib/snapserver", user, group);
-            daemon.reset(new Daemon(user, group, "/var/run/snapserver/pid"));
+            if (data_dir.empty())
+                data_dir = "/var/lib/snapserver";
+            Config::instance().init(data_dir, user, group);
+            daemon.reset(new Daemon(user, group, pid_file));
+            SLOG(NOTICE) << "daemonizing" << std::endl;
             daemon->daemonize();
             if (processPriority < -20)
                 processPriority = -20;
@@ -230,14 +239,14 @@ int main(int argc, char* argv[])
             SLOG(NOTICE) << "daemon started" << std::endl;
         }
         else
-            Config::instance().init();
+            Config::instance().init(data_dir);
 #else
         Config::instance().init();
 #endif
 
-
+        boost::asio::io_context io_context;
 #if defined(HAS_AVAHI) || defined(HAS_BONJOUR)
-        PublishZeroConf publishZeroConfg("Snapcast");
+        auto publishZeroConfg = std::make_unique<PublishZeroConf>("Snapcast", io_context);
         vector<mDNSService> dns_services;
         dns_services.emplace_back("_snapcast._tcp", settings.stream.port);
         dns_services.emplace_back("_snapcast-stream._tcp", settings.stream.port);
@@ -250,12 +259,12 @@ int main(int argc, char* argv[])
         {
             dns_services.emplace_back("_snapcast-http._tcp", settings.http.port);
         }
-        publishZeroConfg.publish(dns_services);
+        publishZeroConfg->publish(dns_services);
 #endif
-        if (settings.stream.streamReadMs < 10)
+        if (settings.stream.streamChunkMs < 10)
         {
-            LOG(WARNING) << "Stream read buffer is less than 10ms, changing to 10ms\n";
-            settings.stream.streamReadMs = 10;
+            LOG(WARNING) << "Stream read chunk size is less than 10ms, changing to 10ms\n";
+            settings.stream.streamChunkMs = 10;
         }
 
         if (settings.stream.bufferMs < 400)
@@ -264,18 +273,29 @@ int main(int argc, char* argv[])
             settings.stream.bufferMs = 400;
         }
 
-        boost::asio::io_context io_context;
-        std::unique_ptr<StreamServer> streamServer(new StreamServer(io_context, settings));
+        auto streamServer = std::make_unique<StreamServer>(io_context, settings);
         streamServer->start();
 
-        LOG(DEBUG) << "number of threads: " << num_threads << ", hw threads: " << std::thread::hardware_concurrency() << "\n";
+        if (num_threads < 0)
+            num_threads = std::max(2, std::min(4, static_cast<int>(std::thread::hardware_concurrency())));
+        LOG(INFO) << "number of threads: " << num_threads << ", hw threads: " << std::thread::hardware_concurrency() << "\n";
+
+        // Construct a signal set registered for process termination.
+        boost::asio::signal_set signals(io_context, SIGHUP, SIGINT, SIGTERM);
+        signals.async_wait([&io_context](const boost::system::error_code& ec, int signal) {
+            if (!ec)
+                SLOG(INFO) << "Received signal " << signal << ": " << strsignal(signal) << "\n";
+            else
+                SLOG(INFO) << "Failed to wait for signal: " << ec << "\n";
+            io_context.stop();
+        });
+
         std::vector<std::thread> threads;
-        for (size_t n = 0; n < num_threads; ++n)
+        for (int n = 0; n < num_threads; ++n)
             threads.emplace_back([&] { io_context.run(); });
 
-        auto sig = install_signal_handler({SIGHUP, SIGTERM, SIGINT}).get();
-        SLOG(INFO) << "Received signal " << sig << ": " << strsignal(sig) << "\n";
-        io_context.stop();
+        io_context.run();
+
         for (auto& t : threads)
             t.join();
 

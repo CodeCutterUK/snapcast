@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -51,8 +51,8 @@ protected:
     FLAC__int32* pcmBuffer_;
     int pcmBufferSize_;
 
-    msg::PcmChunk* flacChunk_;
     size_t encodedSamples_;
+    std::shared_ptr<msg::PcmChunk> flacChunk_;
 };
 
 } // namespace encoder

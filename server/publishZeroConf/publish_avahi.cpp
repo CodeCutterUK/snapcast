@@ -23,11 +23,13 @@
 #include <cstdlib>
 
 
+static constexpr auto LOG_TAG = "Avahi";
+
 static AvahiEntryGroup* group;
 static AvahiSimplePoll* simple_poll;
 static char* name;
 
-PublishAvahi::PublishAvahi(const std::string& serviceName) : PublishmDNS(serviceName), client_(nullptr), active_(false)
+PublishAvahi::PublishAvahi(const std::string& serviceName, boost::asio::io_context& ioc) : PublishmDNS(serviceName, ioc), client_(nullptr), timer_(ioc)
 {
     group = nullptr;
     simple_poll = nullptr;
@@ -43,7 +45,7 @@ void PublishAvahi::publish(const std::vector<mDNSService>& services)
     if (!(simple_poll = avahi_simple_poll_new()))
     {
         /// TODO: error handling
-        LOG(ERROR) << "Failed to create simple poll object.\n";
+        LOG(ERROR, LOG_TAG) << "Failed to create simple poll object.\n";
     }
 
     /// Allocate a new client
@@ -53,25 +55,26 @@ void PublishAvahi::publish(const std::vector<mDNSService>& services)
     /// Check wether creating the client object succeeded
     if (!client_)
     {
-        LOG(ERROR) << "Failed to create client: " << avahi_strerror(error) << "\n";
+        LOG(ERROR, LOG_TAG) << "Failed to create client: " << avahi_strerror(error) << "\n";
     }
 
-    active_ = true;
-    pollThread_ = std::thread(&PublishAvahi::worker, this);
+    poll();
 }
 
 
-void PublishAvahi::worker()
+void PublishAvahi::poll()
 {
-    while (active_ && (avahi_simple_poll_iterate(simple_poll, 100) == 0))
-        ;
+    timer_.expires_after(std::chrono::milliseconds(50));
+    timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (!ec && (avahi_simple_poll_iterate(simple_poll, 0) == 0))
+            poll();
+    });
 }
 
 
 PublishAvahi::~PublishAvahi()
 {
-    active_ = false;
-    pollThread_.join();
+    timer_.cancel();
 
     if (client_)
         avahi_client_free(client_);
@@ -93,7 +96,7 @@ void PublishAvahi::entry_group_callback(AvahiEntryGroup* g, AvahiEntryGroupState
     {
         case AVAHI_ENTRY_GROUP_ESTABLISHED:
             /// The entry group has been established successfully
-            LOG(INFO) << "Service '" << name << "' successfully established.\n";
+            LOG(INFO, LOG_TAG) << "Service '" << name << "' successfully established.\n";
             break;
 
         case AVAHI_ENTRY_GROUP_COLLISION:
@@ -105,7 +108,7 @@ void PublishAvahi::entry_group_callback(AvahiEntryGroup* g, AvahiEntryGroupState
             avahi_free(name);
             name = n;
 
-            LOG(NOTICE) << "Service name collision, renaming service to '" << name << "'\n";
+            LOG(NOTICE, LOG_TAG) << "Service name collision, renaming service to '" << name << "'\n";
 
             /// And recreate the services
             static_cast<PublishAvahi*>(userdata)->create_services(avahi_entry_group_get_client(g));
@@ -114,7 +117,7 @@ void PublishAvahi::entry_group_callback(AvahiEntryGroup* g, AvahiEntryGroupState
 
         case AVAHI_ENTRY_GROUP_FAILURE:
 
-            LOG(ERROR) << "Entry group failure: " << avahi_strerror(avahi_client_errno(avahi_entry_group_get_client(g))) << "\n";
+            LOG(ERROR, LOG_TAG) << "Entry group failure: " << avahi_strerror(avahi_client_errno(avahi_entry_group_get_client(g))) << "\n";
 
             /// Some kind of failure happened while we were registering our services
             avahi_simple_poll_quit(simple_poll);
@@ -135,7 +138,7 @@ void PublishAvahi::create_services(AvahiClient* c)
     {
         if (!(group = avahi_entry_group_new(c, entry_group_callback, this)))
         {
-            LOG(ERROR) << "avahi_entry_group_new() failed: " << avahi_strerror(avahi_client_errno(c)) << "\n";
+            LOG(ERROR, LOG_TAG) << "avahi_entry_group_new() failed: " << avahi_strerror(avahi_client_errno(c)) << "\n";
             goto fail;
         }
     }
@@ -144,18 +147,18 @@ void PublishAvahi::create_services(AvahiClient* c)
     int ret;
     if (avahi_entry_group_is_empty(group))
     {
-        LOG(INFO) << "Adding service '" << name << "'\n";
+        LOG(INFO, LOG_TAG) << "Adding service '" << name << "'\n";
 
         /// We will now add two services and one subtype to the entry group
         for (const auto& service : services_)
         {
             if ((ret = avahi_entry_group_add_service(group, AVAHI_IF_UNSPEC, AVAHI_PROTO_UNSPEC, AvahiPublishFlags(0), name, service.name_.c_str(), nullptr,
-                                                     nullptr, service.port_, NULL)) < 0)
+                                                     nullptr, service.port_, static_cast<char*>(NULL))) < 0)
             {
                 if (ret == AVAHI_ERR_COLLISION)
                     goto collision;
 
-                LOG(ERROR) << "Failed to add " << service.name_ << " service: " << avahi_strerror(ret) << "\n";
+                LOG(ERROR, LOG_TAG) << "Failed to add " << service.name_ << " service: " << avahi_strerror(ret) << "\n";
                 goto fail;
             }
         }
@@ -172,7 +175,7 @@ void PublishAvahi::create_services(AvahiClient* c)
         /// Tell the server to register the service
         if ((ret = avahi_entry_group_commit(group)) < 0)
         {
-            LOG(ERROR) << "Failed to commit entry group: " << avahi_strerror(ret) << "\n";
+            LOG(ERROR, LOG_TAG) << "Failed to commit entry group: " << avahi_strerror(ret) << "\n";
             goto fail;
         }
     }
@@ -186,7 +189,7 @@ collision:
     avahi_free(name);
     name = n;
 
-    LOG(INFO) << "Service name collision, renaming service to '" << name << "'\n";
+    LOG(INFO, LOG_TAG) << "Service name collision, renaming service to '" << name << "'\n";
 
     avahi_entry_group_reset(group);
 
@@ -213,7 +216,7 @@ void PublishAvahi::client_callback(AvahiClient* c, AvahiClientState state, AVAHI
 
         case AVAHI_CLIENT_FAILURE:
 
-            LOG(ERROR) << "Client failure: " << avahi_strerror(avahi_client_errno(c)) << "\n";
+            LOG(ERROR, LOG_TAG) << "Client failure: " << avahi_strerror(avahi_client_errno(c)) << "\n";
             avahi_simple_poll_quit(simple_poll);
             break;
 

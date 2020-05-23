@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,12 +25,13 @@
 using namespace std;
 namespace strutils = utils::string;
 
+namespace streamreader
+{
 
 StreamUri::StreamUri(const std::string& uri)
 {
     parse(uri);
 }
-
 
 
 void StreamUri::parse(const std::string& streamUri)
@@ -47,7 +48,7 @@ void StreamUri::parse(const std::string& streamUri)
         uri = uri.substr(0, this->uri.length() - 1);
 
     string decodedUri = strutils::uriDecode(uri);
-    LOG(DEBUG) << "StreamUri: " << decodedUri << "\n";
+    LOG(DEBUG) << "StreamUri decoded: " << decodedUri << "\n";
 
     string tmp(decodedUri);
 
@@ -64,7 +65,12 @@ void StreamUri::parse(const std::string& streamUri)
 
     pos = tmp.find('/');
     if (pos == string::npos)
-        throw invalid_argument("missing path separator: '/'");
+    {
+        pos = tmp.find('?');
+        if (pos == string::npos)
+            pos = tmp.length();
+    }
+
     host = strutils::trim_copy(tmp.substr(0, pos));
     tmp = tmp.substr(pos);
     path = tmp;
@@ -140,4 +146,5 @@ std::string StreamUri::getQuery(const std::string& key, const std::string& def) 
     if (iter != query.end())
         return iter->second;
     return def;
+}
 }

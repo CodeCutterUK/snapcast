@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,9 +41,9 @@ ControlSessionTcp::~ControlSessionTcp()
 void ControlSessionTcp::do_read()
 {
     const std::string delimiter = "\n";
-    auto self(shared_from_this());
     boost::asio::async_read_until(
-        socket_, streambuf_, delimiter, boost::asio::bind_executor(strand_, [this, self, delimiter](const std::error_code& ec, std::size_t bytes_transferred) {
+        socket_, streambuf_, delimiter,
+        boost::asio::bind_executor(strand_, [ this, self = shared_from_this(), delimiter ](const std::error_code& ec, std::size_t bytes_transferred) {
             if (ec)
             {
                 LOG(ERROR) << "Error while reading from control socket: " << ec.message() << "\n";
@@ -92,8 +92,8 @@ void ControlSessionTcp::stop()
 
 void ControlSessionTcp::sendAsync(const std::string& message)
 {
-    strand_.post([this, message]() {
-        messages_.emplace_back(message);
+    strand_.post([ this, self = shared_from_this(), message ]() {
+        messages_.emplace_back(message + "\r\n");
         if (messages_.size() > 1)
         {
             LOG(DEBUG) << "TCP session outstanding async_writes: " << messages_.size() << "\n";
@@ -105,10 +105,8 @@ void ControlSessionTcp::sendAsync(const std::string& message)
 
 void ControlSessionTcp::send_next()
 {
-    auto self(shared_from_this());
-    auto message = messages_.front();
-    boost::asio::async_write(socket_, boost::asio::buffer(message + "\r\n"),
-                             boost::asio::bind_executor(strand_, [this, self](std::error_code ec, std::size_t length) {
+    boost::asio::async_write(socket_, boost::asio::buffer(messages_.front()),
+                             boost::asio::bind_executor(strand_, [ this, self = shared_from_this() ](std::error_code ec, std::size_t length) {
                                  messages_.pop_front();
                                  if (ec)
                                  {

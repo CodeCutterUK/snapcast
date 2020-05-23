@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
 
-project(snapcast LANGUAGES CXX VERSION 0.17.1)
-set(PROJECT_DESCRIPTION "Multi-room client-server audio player")
+project(snapcast LANGUAGES CXX VERSION 0.19.0)
+set(PROJECT_DESCRIPTION "Multiroom client-server audio player")
 set(PROJECT_URL "https://github.com/badaix/snapcast")
 
 option(BUILD_SHARED_LIBS "Build snapcast in a shared context" ON)
@@ -16,6 +16,7 @@ option(BUILD_WITH_VORBIS "Build with VORBIS support" ON)
 option(BUILD_WITH_TREMOR "Build with vorbis using TREMOR" ON)
 option(BUILD_WITH_OPUS "Build with OPUS support" ON)
 option(BUILD_WITH_AVAHI "Build with AVAHI support" ON)
+option(BUILD_WITH_EXPAT "Build with EXPAT support" ON)
 
 
 if (NOT BUILD_SHARED_LIBS AND NOT BUILD_STATIC_LIBS)
@@ -179,6 +180,13 @@ if(BUILD_WITH_OPUS)
     if (OPUS_FOUND)
         add_definitions("-DHAS_OPUS")
     endif (OPUS_FOUND)
+endif()
+
+if(BUILD_WITH_EXPAT)
+    pkg_search_module(EXPAT expat)
+    if (EXPAT_FOUND)
+        add_definitions("-DHAS_EXPAT")
+    endif (EXPAT_FOUND)
 endif()
 
 find_package(Boost 1.70 REQUIRED)

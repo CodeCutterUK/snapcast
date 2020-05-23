@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -38,19 +38,45 @@ class ClientConnection;
 
 
 /// Used to synchronize server requests (wait for server response)
-struct PendingRequest
+class PendingRequest
 {
-    PendingRequest(uint16_t reqId) : id(reqId), response(nullptr){};
+public:
+    PendingRequest(uint16_t reqId) : id_(reqId)
+    {
+        future_ = promise_.get_future();
+    };
 
-    uint16_t id;
-    std::shared_ptr<msg::SerializedMessage> response;
-    std::condition_variable cv;
+    template <typename Rep, typename Period>
+    std::unique_ptr<msg::BaseMessage> waitForResponse(const std::chrono::duration<Rep, Period>& timeout)
+    {
+        try
+        {
+            if (future_.wait_for(timeout) == std::future_status::ready)
+                return future_.get();
+        }
+        catch (...)
+        {
+        }
+        return nullptr;
+    }
+
+    void setValue(std::unique_ptr<msg::BaseMessage> value)
+    {
+        promise_.set_value(std::move(value));
+    }
+
+    uint16_t id() const
+    {
+        return id_;
+    }
+
+private:
+    uint16_t id_;
+
+    std::promise<std::unique_ptr<msg::BaseMessage>> promise_;
+    std::future<std::unique_ptr<msg::BaseMessage>> future_;
 };
 
-
-/// would be nicer to use std::exception_ptr
-/// but not supported on all plattforms
-typedef std::shared_ptr<std::exception> shared_exception_ptr;
 
 /// Interface: callback for a received message and error reporting
 class MessageReceiver
@@ -58,7 +84,7 @@ class MessageReceiver
 public:
     virtual ~MessageReceiver() = default;
     virtual void onMessageReceived(ClientConnection* connection, const msg::BaseMessage& baseMessage, char* buffer) = 0;
-    virtual void onException(ClientConnection* connection, shared_exception_ptr exception) = 0;
+    virtual void onException(ClientConnection* connection, std::exception_ptr exception) = 0;
 };
 
 
@@ -79,18 +105,24 @@ public:
     virtual bool send(const msg::BaseMessage* message);
 
     /// Send request to the server and wait for answer
-    virtual std::shared_ptr<msg::SerializedMessage> sendRequest(const msg::BaseMessage* message, const chronos::msec& timeout = chronos::msec(1000));
+    virtual std::unique_ptr<msg::BaseMessage> sendRequest(const msg::BaseMessage* message, const chronos::msec& timeout = chronos::msec(1000));
 
     /// Send request to the server and wait for answer of type T
     template <typename T>
-    std::shared_ptr<T> sendReq(const msg::BaseMessage* message, const chronos::msec& timeout = chronos::msec(1000))
+    std::unique_ptr<T> sendReq(const msg::BaseMessage* message, const chronos::msec& timeout = chronos::msec(1000))
     {
-        std::shared_ptr<msg::SerializedMessage> reply = sendRequest(message, timeout);
-        if (!reply)
+        std::unique_ptr<msg::BaseMessage> response = sendRequest(message, timeout);
+        if (!response)
             return nullptr;
-        std::shared_ptr<T> msg(new T);
-        msg->deserialize(reply->message, reply->buffer);
-        return msg;
+
+        T* tmp = dynamic_cast<T*>(response.get());
+        std::unique_ptr<T> result;
+        if (tmp != nullptr)
+        {
+            response.release();
+            result.reset(tmp);
+        }
+        return result;
     }
 
     std::string getMacAddress();
@@ -106,6 +138,10 @@ protected:
     void socketRead(void* to, size_t bytes);
     void getNextMessage();
 
+    msg::BaseMessage base_message_;
+    std::vector<char> buffer_;
+    size_t base_msg_size_;
+
     boost::asio::io_context io_context_;
     mutable std::mutex socketMutex_;
     tcp::socket socket_;
@@ -116,7 +152,7 @@ protected:
     uint16_t reqId_;
     std::string host_;
     size_t port_;
-    std::thread* readerThread_;
+    std::unique_ptr<std::thread> readerThread_;
     chronos::msec sumTimeout_;
 };
 

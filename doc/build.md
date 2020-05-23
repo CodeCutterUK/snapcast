@@ -22,25 +22,27 @@ Next clone the external submodules:
     $ cd <snapcast dir>/externals
     $ git submodule update --init --recursive
 
+Snapcast depends on boost 1.70 or higher. Since it depends on header only boost libs, boost does not need to be installed, but the boost include path must be set properly: download and extract the latest boost version and add the include path, e.g. calling `make` with prepended `ADD_CFLAGS`: `ADD_CFLAGS="-I/path/to/boost_1_7x_0/" make`.  
+For `cmake` you must add the path to the `-DBOOST_ROOT` flag: `cmake -DBOOST_ROOT=/path/to/boost_1_7x_0`
 
 ## Linux (Native)
 Install the build tools and required libs:  
 For Debian derivates (e.g. Raspbian, Debian, Ubuntu, Mint):
 
     $ sudo apt-get install build-essential
-    $ sudo apt-get install libasound2-dev libvorbisidec-dev libvorbis-dev libflac-dev alsa-utils libavahi-client-dev avahi-daemon
+    $ sudo apt-get install libasound2-dev libvorbisidec-dev libvorbis-dev libopus-dev libflac-dev libsoxr-dev alsa-utils libavahi-client-dev avahi-daemon expat
 
 Compilation requires gcc 4.8 or higher, so it's highly recommended to use Debian (Raspbian) Jessie.
 
 For Arch derivates:
 
     $ sudo pacman -S base-devel
-    $ sudo pacman -S alsa-lib avahi libvorbis flac alsa-utils boost
+    $ sudo pacman -S alsa-lib avahi libvorbis opus-dev flac libsoxr alsa-utils boost expat
 
-For Fedora (and probably RHEL, CentOS & Scientific Linux, but untested):
+For Fedora (and probably RHEL, CentOS, & Scientific Linux, but untested):
 
     $ sudo dnf install @development-tools
-    $ sudo dnf install alsa-lib-devel avahi-devel libvorbis-devel flac-devel libstdc++-static
+    $ sudo dnf install alsa-lib-devel avahi-devel libvorbis-devel opus-devel flac-devel soxr-devel libstdc++-static expat
 
 ### Build Snapclient and Snapserver
 `cd` into the Snapcast src-root directory:
@@ -87,10 +89,14 @@ Debian packages can be made with
     $ cd <snapcast dir>
     $ fakeroot make -f debian/rules binary
 
+If you don't have boost installed or in your standard include paths, you can call
+    
+    $ fakeroot make -f debian/rules CPPFLAGS="-I/path/to/boost_1_7x_0" binary
+
 ## FreeBSD (Native)
 Install the build tools and required libs:  
 
-    $ sudo pkg install gmake gcc bash avahi libogg libvorbis flac
+    $ sudo pkg install gmake gcc bash avahi libogg libvorbis libopus flac libsoxr
 
 ### Build Snapserver
 `cd` into the Snapserver src-root directory:
@@ -139,7 +145,7 @@ These can be set either in the [global configuration](https://wiki.gentoo.org/wi
     fi
     echo 'media-sound/snapcast client server flac
 
-If for example you only wish to build the server and *not* the client then preceed the server `USE` flag with `-` i.e.
+If for example you only wish to build the server and *not* the client then precede the server `USE` flag with `-` i.e.
 
     echo 'media-sound/snapcast client -server
 
@@ -168,7 +174,7 @@ To enable the serve and client to start under the default run-level:
  3. Install the required libs
 
 ```   
-$ brew install flac libvorbis
+$ brew install flac libsoxr libvorbis boost opus
 ```
 
 ### Build Snapclient
@@ -207,22 +213,24 @@ http://developer.android.com/ndk/guides/standalone_toolchain.html
 ```
 $ cd /SOME/LOCAL/PATH/android-ndk-r17/build/tools
 $ ./make_standalone_toolchain.py --arch arm --api 16 --stl libc++ --install-dir <android-ndk dir>-arm
+$ ./make_standalone_toolchain.py --arch arm64 --api 21 --stl libc++ --install-dir <android-ndk dir>-arm64
 $ ./make_standalone_toolchain.py --arch x86 --api 16 --stl libc++ --install-dir <android-ndk dir>-x86
 ```
 
 ### Build Snapclient
-Cross compile and install FLAC, ogg, and tremor (only needed once):
+Cross compile and install FLAC, opus, ogg, and tremor (only needed once):
 
     $ cd <snapcast dir>/externals
     $ make NDK_DIR=<android-ndk dir>-arm ARCH=arm
+    $ make NDK_DIR=<android-ndk dir>-arm64 ARCH=aarch64
     $ make NDK_DIR=<android-ndk dir>-x86 ARCH=x86
   
 Compile the Snapclient:
 
     $ cd <snapcast dir>/client
-    $ ./build_android_all.sh <android-ndk dir> <snapdroid assets dir>
+    $ ./build_android_all.sh <android-ndk dir> <snapdroid jniLibs dir>
 
-The binaries for `armeabi` and `x86` will be copied into the Android's assets directory (`<snapdroid assets dir>/bin/`) and so will be bundled with the Snapcast App.
+The binaries for `armeabi`, `arm64-v8a` and `x86` will be copied into the Android's jniLibs directory (`<snapdroid jniLibs dir>/`) and so will be bundled with the Snapcast App.
 
 
 ## OpenWrt/LEDE (Cross compile)
@@ -282,7 +290,7 @@ Clone Buildroot to some place in your home directory (`<buildroot dir>`):
     $ BUILDROOT_VERSION=2016.11.2
     $ git clone --branch $BUILDROOT_VERSION --depth=1 git://git.buildroot.net/buildroot
 
-The `<snapcast dir>/buildroot` is currently setup as an external Buildroot folder following the [recommended structure](https://buildroot.org/downloads/manual/manual.html#customize-dir-structure). As of [Buildroot 2016.11](https://git.buildroot.net/buildroot/tag/?h=2016.11) you may specify multiple BR2_EXTERNAL trees. If you are using a version of Buildroot prior to this, then you will need to manually merge `<snapcast dir>/buildroot` with your existing Buildroot external tree.
+The `<snapcast dir>/buildroot` is currently set up as an external Buildroot folder following the [recommended structure](https://buildroot.org/downloads/manual/manual.html#customize-dir-structure). As of [Buildroot 2016.11](https://git.buildroot.net/buildroot/tag/?h=2016.11) you may specify multiple BR2_EXTERNAL trees. If you are using a version of Buildroot prior to this, then you will need to manually merge `<snapcast dir>/buildroot` with your existing Buildroot external tree.
 
 Now configure buildroot with the [required packages](/buildroot/configs/snapcast_defconfig) (you can also manually add them to your project's existing defconfig):
 

@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,43 +25,50 @@
 
 using namespace std;
 
-static string hex2str(string input)
+namespace streamreader
+{
+
+static constexpr auto LOG_TAG = "AirplayStream";
+
+namespace
+{
+string hex2str(string input)
 {
     typedef unsigned char byte;
     unsigned long x = strtoul(input.c_str(), nullptr, 16);
     byte a[] = {byte(x >> 24), byte(x >> 16), byte(x >> 8), byte(x), 0};
     return string((char*)a);
 }
+} // namespace
 
 /*
  * Expat is used in metadata parsing from Shairport-sync.
  * Without HAS_EXPAT defined no parsing will occur.
- *
- * This is currently defined in airplayStream.h, prolly should
- * move to Makefile?
  */
 
-AirplayStream::AirplayStream(PcmListener* pcmListener, const StreamUri& uri) : ProcessStream(pcmListener, uri), port_(5000)
+AirplayStream::AirplayStream(PcmListener* pcmListener, boost::asio::io_context& ioc, const StreamUri& uri)
+    : ProcessStream(pcmListener, ioc, uri), port_(5000), pipe_open_timer_(ioc)
 {
     logStderr_ = true;
 
-    pipePath_ = "/tmp/shairmeta." + cpt::to_string(getpid());
-    // cout << "Pipe [" << pipePath_ << "]\n";
-
-    // XXX: Check if pipe exists, delete or throw error
-
-    sampleFormat_ = SampleFormat("44100:16:2");
-    uri_.query["sampleformat"] = sampleFormat_.getFormat();
+    string devicename = uri_.getQuery("devicename", "Snapcast");
+    params_wo_port_ = "\"--name=" + devicename + "\" --output=stdout --use-stderr --get-coverart";
 
     port_ = cpt::stoul(uri_.getQuery("port", "5000"));
+    setParamsAndPipePathFromPort();
 
-    string devicename = uri_.getQuery("devicename", "Snapcast");
-    params_wo_port_ = "--name=\"" + devicename + "\" --output=stdout";
-    params_wo_port_ += " --metadata-pipename " + pipePath_;
-    params_ = params_wo_port_ + " --port=" + cpt::to_string(port_);
-
-    pipeReaderThread_ = thread(&AirplayStream::pipeReader, this);
-    pipeReaderThread_.detach();
+#ifdef HAS_EXPAT
+    createParser();
+    metadata_dirty_ = false;
+    metadata_ = json();
+    metadata_["ALBUM"] = "";
+    metadata_["ARTIST"] = "";
+    metadata_["TITLE"] = "";
+    metadata_["COVER"] = "";
+#else
+    LOG(INFO, LOG_TAG) << "Metadata support not enabled (HAS_EXPAT not defined)"
+                       << "\n";
+#endif
 }
 
 
@@ -99,53 +106,160 @@ void AirplayStream::createParser()
 
 void AirplayStream::push()
 {
+    // The metadata we collect consists of two parts:
+    // (1) ALBUM, ARTIST, TITLE
+    // (2) COVER
+    //
+    // This stems from the Airplay protocol, which treats cover art differently from the rest of the metadata.
+    //
+    // The process for (1) is as follows:
+    // - The ssnc->mdst message is sent ("metadata start")
+    // - core->asal|asar|minm messages are sent
+    // - The ssnc->mden message is sent ("metadata end")
+    // This process can repeat multiple times *for the same song*, with *the same metadata*.
+    //
+    // The process for (2) is as follows:
+    // - The ssnc->pcst message is sent ("picture start")
+    // - The ssnc->PICT message is sent (picture contents)
+    // - The ssnc->pcen message is sent ("picture end")
+    // If no cover art is available, the PICT message's data has a length of 0 *or* none of the messages are sent.
+    //
+    // Here is an example from an older iPad:
+    //
+    // User plays song without cover art
+    // - empty cover art message (2)
+    // - empty cover art message (2)
+    // - metadata message (1)
+    // - metadata message (1)
+    // - metadata message (1)
+    // User selects next song without cover art
+    // - metadata message (1)
+    // - metadata message (1)
+    // User selects next song with cover art
+    // - metadata message (1)
+    // - metadata message (1)
+    // - cover art message (2)
+    // - metadata message (1)
+    // User selects next song with cover art
+    // - metadata message (1)
+    // - metadata message (1)
+    // - empty cover art message (2) (!)
+    // - metadata message (1)
+    // - cover art message (2)
+    //
+    // As can be seen, the order of metadata (1) and cover (2) messages is non-deterministic.
+    // That is why we call setMeta() on both end of message (1) and (2).
     string data = entry_->data;
-    if (entry_->isBase64 && entry_->length > 0)
+
+    // Do not base64 decode cover art
+    const bool is_cover = entry_->type == "ssnc" && entry_->code == "PICT";
+    if (!is_cover && entry_->isBase64 && entry_->length > 0)
         data = base64_decode(data);
 
-    if (entry_->type == "ssnc" && entry_->code == "mdst")
-        jtag_ = json();
-
-    if (entry_->code == "asal")
-        jtag_["ALBUM"] = data;
-    if (entry_->code == "asar")
-        jtag_["ARTIST"] = data;
-    if (entry_->code == "minm")
-        jtag_["TITLE"] = data;
-
-    if (entry_->type == "ssnc" && entry_->code == "mden")
+    if (is_cover)
     {
-        // LOG(INFO) << "metadata=" << jtag_.dump(4) << "\n";
-        setMeta(jtag_);
+        setMetaData("COVER", data);
+        // LOG(INFO, LOG_TAG) << "Metadata type: " << entry_->type << " code: " << entry_->code << " data length: " << data.length() << "\n";
+    }
+    else
+    {
+        // LOG(INFO, LOG_TAG) << "Metadata type: " << entry_->type << " code: " << entry_->code << " data: " << data << "\n";
+    }
+
+    if (entry_->type == "core" && entry_->code == "asal")
+        setMetaData("ALBUM", data);
+    if (entry_->type == "core" && entry_->code == "asar")
+        setMetaData("ARTIST", data);
+    if (entry_->type == "core" && entry_->code == "minm")
+        setMetaData("TITLE", data);
+
+    // mden = metadata end, pcen == picture end
+    if (metadata_dirty_ && entry_->type == "ssnc" && (entry_->code == "mden" || entry_->code == "pcen"))
+    {
+        setMeta(metadata_);
+        metadata_dirty_ = false;
+    }
+}
+
+void AirplayStream::setMetaData(const string& key, const string& newValue)
+{
+    // Only overwrite metadata and set metadata_dirty_ if the metadata has changed.
+    // This avoids multiple unnecessary transmissions of the same metadata.
+    const auto& oldValue = metadata_[key];
+    if (oldValue != newValue)
+    {
+        metadata_[key] = newValue;
+        metadata_dirty_ = true;
     }
 }
 #endif
 
-void AirplayStream::pipeReader()
+
+void AirplayStream::setParamsAndPipePathFromPort()
 {
-#ifdef HAS_EXPAT
-    createParser();
-#endif
+    pipePath_ = "/tmp/shairmeta." + cpt::to_string(getpid()) + "." + cpt::to_string(port_);
+    params_ = params_wo_port_ + " \"--metadata-pipename=" + pipePath_ + "\" --port=" + cpt::to_string(port_);
+}
 
-    while (true)
+
+void AirplayStream::do_connect()
+{
+    ProcessStream::do_connect();
+    pipeReadLine();
+}
+
+
+void AirplayStream::pipeReadLine()
+{
+    if (!pipe_fd_ || !pipe_fd_->is_open())
     {
-        ifstream pipe(pipePath_);
-
-        if (pipe)
+        try
         {
-            string line;
+            int fd = open(pipePath_.c_str(), O_RDONLY | O_NONBLOCK);
+            pipe_fd_ = std::make_unique<boost::asio::posix::stream_descriptor>(ioc_, fd);
+            LOG(INFO, LOG_TAG) << "Metadata pipe opened: " << pipePath_ << "\n";
+        }
+        catch (const std::exception& e)
+        {
+            LOG(ERROR, LOG_TAG) << "Error opening metadata pipe, retrying in 500ms. Error: " << e.what() << "\n";
+            pipe_fd_ = nullptr;
+            wait(pipe_open_timer_, 500ms, [this] { pipeReadLine(); });
+            return;
+        }
+    }
 
-            while (getline(pipe, line))
+    const std::string delimiter = "\n";
+    boost::asio::async_read_until(*pipe_fd_, streambuf_pipe_, delimiter, [this, delimiter](const std::error_code& ec, std::size_t bytes_transferred) {
+        if (ec)
+        {
+            if (ec.value() == boost::asio::error::eof)
             {
-#ifdef HAS_EXPAT
-                parse(line);
-#endif
+                // For some reason, EOF is returned until the first metadata is written to the pipe.
+                // Is this a boost bug?
+                LOG(INFO, LOG_TAG) << "Waiting for metadata, retrying in 2500ms"
+                                   << "\n";
+                wait(pipe_open_timer_, 2500ms, [this] { pipeReadLine(); });
             }
+            else
+            {
+                LOG(ERROR, LOG_TAG) << "Error while reading from metadata pipe: " << ec.message() << "\n";
+            }
+            return;
         }
 
-        // Wait a little until we try to open it again
-        this_thread::sleep_for(chrono::milliseconds(500));
-    }
+        // Extract up to the first delimiter.
+        std::string line{buffers_begin(streambuf_pipe_.data()), buffers_begin(streambuf_pipe_.data()) + bytes_transferred - delimiter.length()};
+        if (!line.empty())
+        {
+            if (line.back() == '\r')
+                line.resize(line.size() - 1);
+#ifdef HAS_EXPAT
+            parse(line);
+#endif
+        }
+        streambuf_pipe_.consume(bytes_transferred);
+        pipeReadLine();
+    });
 }
 
 void AirplayStream::initExeAndPath(const string& filename)
@@ -167,22 +281,21 @@ void AirplayStream::initExeAndPath(const string& filename)
 }
 
 
-void AirplayStream::onStderrMsg(const char* buffer, size_t n)
+void AirplayStream::onStderrMsg(const std::string& line)
 {
-    string logmsg = utils::string::trim_copy(string(buffer, n));
-    if (logmsg.empty())
+    if (line.empty())
         return;
-    LOG(INFO) << "(" << getName() << ") " << logmsg << "\n";
-    if (logmsg.find("Is another Shairport Sync running on this device") != string::npos)
+    LOG(INFO, LOG_TAG) << "(" << getName() << ") " << line << "\n";
+    if (line.find("Is another instance of Shairport Sync running on this device") != string::npos)
     {
-        LOG(ERROR) << "Seem there is another Shairport Sync runnig on port " << port_ << ", switching to port " << port_ + 1 << "\n";
+        LOG(ERROR, LOG_TAG) << "It seems there is another Shairport Sync runnig on port " << port_ << ", switching to port " << port_ + 1 << "\n";
         ++port_;
-        params_ = params_wo_port_ + " --port=" + cpt::to_string(port_);
+        setParamsAndPipePathFromPort();
     }
-    else if (logmsg.find("Invalid audio output specified") != string::npos)
+    else if (line.find("Invalid audio output specified") != string::npos)
     {
-        LOG(ERROR) << "shairport sync compiled without stdout audio backend\n";
-        LOG(ERROR) << "build with: \"./configure --with-stdout --with-avahi --with-ssl=openssl --with-metadata\"\n";
+        LOG(ERROR, LOG_TAG) << "shairport sync compiled without stdout audio backend\n";
+        LOG(ERROR, LOG_TAG) << "build with: \"./configure --with-stdout --with-avahi --with-ssl=openssl --with-metadata\"\n";
     }
 }
 
@@ -237,4 +350,7 @@ void XMLCALL AirplayStream::data(void* userdata, const char* content, int length
     string value(content, (size_t)length);
     self->buf_.append(value);
 }
+
 #endif
+
+} // namespace streamreader

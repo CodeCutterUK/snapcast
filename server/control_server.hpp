@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,8 +23,6 @@
 #include <memory>
 #include <mutex>
 #include <set>
-#include <sstream>
-#include <thread>
 #include <vector>
 
 #include "common/queue.h"

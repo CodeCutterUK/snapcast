@@ -1,5 +1,5 @@
 #    This file is part of snapcast
-#   Copyright (C) 2014-2019  Johannes Pohl
+#   Copyright (C) 2014-2020  Johannes Pohl
 #
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-VERSION = 0.17.1-CodeCutterUK-01
+VERSION = 0.19.0-CodeCutterUK-01
 BIN = snapserver
 
 ifeq ($(TARGET), FREEBSD)
@@ -44,7 +44,7 @@ endif
 
 CXXFLAGS += $(ADD_CFLAGS) -std=c++14 -Wall -Wextra -Wpedantic -Wno-unused-function -DBOOST_ERROR_CODE_HEADER_ONLY -DHAS_FLAC -DHAS_OGG -DHAS_VORBIS -DHAS_VORBIS_ENC -DHAS_OPUS -DVERSION=\"$(VERSION)\" -I. -I.. -I../common
 LDFLAGS  += $(ADD_LDFLAGS) -lvorbis -lvorbisenc -logg -lFLAC -lopus
-OBJ       = snapserver.o config.o control_server.o control_session_tcp.o control_session_http.o stream_server.o stream_session.o streamreader/stream_uri.o streamreader/base64.o streamreader/stream_manager.o streamreader/pcm_stream.o streamreader/pipe_stream.o streamreader/file_stream.o streamreader/process_stream.o streamreader/airplay_stream.o streamreader/librespot_stream.o streamreader/watchdog.o encoder/encoder_factory.o encoder/flac_encoder.o encoder/opus_encoder.o encoder/pcm_encoder.o encoder/ogg_encoder.o ../common/sample_format.o
+OBJ       = snapserver.o config.o control_server.o control_session_tcp.o control_session_http.o stream_server.o stream_session.o streamreader/stream_uri.o streamreader/base64.o streamreader/stream_manager.o streamreader/pcm_stream.o streamreader/posix_stream.o streamreader/pipe_stream.o streamreader/file_stream.o streamreader/tcp_stream.o streamreader/process_stream.o streamreader/airplay_stream.o streamreader/librespot_stream.o streamreader/watchdog.o encoder/encoder_factory.o encoder/flac_encoder.o encoder/opus_encoder.o encoder/pcm_encoder.o encoder/ogg_encoder.o ../common/sample_format.o
 
 ifneq (,$(TARGET))
 CXXFLAGS += -D$(TARGET)
@@ -90,7 +90,7 @@ else
 
 CXX       = g++
 CXXFLAGS += -DHAS_AVAHI -DHAS_DAEMON -pthread
-LDFLAGS  += -lrt -lavahi-client -lavahi-common
+LDFLAGS  += -lrt -lavahi-client -lavahi-common -latomic
 OBJ      += ../common/daemon.o publishZeroConf/publish_avahi.o 
 
 endif
@@ -121,7 +121,7 @@ else ifeq ($(TARGET), FREEBSD)
 
 install:
 	echo BSD
-	install --strip -g wheel -o root -m 555 $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
+	install -s -g wheel -o root -m 555 $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
 	install -g wheel -o root -m 555 $(BIN).1 $(TARGET_DIR)/local/man/man1/$(BIN).1
 	install -g wheel -o root -m 555 ../debian/$(BIN).bsd $(TARGET_DIR)/local/etc/rc.d/$(BIN)
 
@@ -129,9 +129,10 @@ else ifeq ($(TARGET), MACOS)
 
 install:
 	echo macOS
-	install --strip -g wheel -o root $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
+	install -s -g wheel -o root $(BIN) $(TARGET_DIR)/local/bin/$(BIN)
 	install -g wheel -o root $(BIN).1 $(TARGET_DIR)/local/share/man/man1/$(BIN).1
-	install -g wheel -o root ../debian/$(BIN).plist /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
+	install -g wheel -o root etc/$(BIN).plist /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
+	install -g wheel -o root etc/$(BIN).conf /etc/$(BIN).conf
 	launchctl load /Library/LaunchAgents/de.badaix.snapcast.$(BIN).plist
 
 else
@@ -154,14 +155,14 @@ install:
 endif
 
 installfiles:
-	install --strip -D -g root -o root $(BIN) $(TARGET_DIR)/bin/$(BIN)
+	install -s -D -g root -o root $(BIN) $(TARGET_DIR)/bin/$(BIN)
 	install -D -g root -o root $(BIN).1 $(TARGET_DIR)/share/man/man1/$(BIN).1
 
 installsystemd:
 	@echo using systemd; \
 	cp ../debian/$(BIN).service /lib/systemd/system/$(BIN).service; \
 	cp -n ../debian/$(BIN).default /etc/default/$(BIN); \
-	cp -n ../server/etc/$(BIN).conf /etc/default/$(BIN).conf; \
+	cp -n etc/$(BIN).conf /etc/$(BIN).conf; \
 	systemctl daemon-reload; \
 	systemctl enable $(BIN); \
 	systemctl start $(BIN); \
@@ -170,7 +171,7 @@ installsysv:
 	@echo using sysv; \
 	cp ../debian/$(BIN).init /etc/init.d/$(BIN); \
 	cp -n ../debian/$(BIN).default /etc/default/$(BIN); \
-	cp -n ../server/etc/$(BIN).conf /etc/default/$(BIN).conf; \
+	cp -n etc/$(BIN).conf /etc/$(BIN).conf; \
 	update-rc.d $(BIN) defaults; \
 	/etc/init.d/$(BIN) start; \
 

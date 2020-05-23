@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,20 +25,23 @@
 #include "common/aixlog.hpp"
 #include "common/snap_exception.hpp"
 #include "common/str_compat.hpp"
-#include "encoder/encoder_factory.hpp"
 #include "pipe_stream.hpp"
 
 
 using namespace std;
 
+namespace streamreader
+{
+
+static constexpr auto LOG_TAG = "PipeStream";
 
 
-PipeStream::PipeStream(PcmListener* pcmListener, const StreamUri& uri) : PcmStream(pcmListener, uri), fd_(-1)
+PipeStream::PipeStream(PcmListener* pcmListener, boost::asio::io_context& ioc, const StreamUri& uri) : PosixStream(pcmListener, ioc, uri)
 {
     umask(0);
     string mode = uri_.getQuery("mode", "create");
 
-    LOG(INFO) << "PipeStream mode: " << mode << "\n";
+    LOG(INFO, LOG_TAG) << "PipeStream mode: " << mode << "\n";
     if ((mode != "read") && (mode != "create"))
         throw SnapException("create mode for fifo must be \"read\" or \"create\"");
 
@@ -50,104 +53,11 @@ PipeStream::PipeStream(PcmListener* pcmListener, const StreamUri& uri) : PcmStre
 }
 
 
-PipeStream::~PipeStream()
+void PipeStream::do_connect()
 {
-    if (fd_ != -1)
-        close(fd_);
+    LOG(DEBUG, LOG_TAG) << "connect\n";
+    int fd = open(uri_.path.c_str(), O_RDONLY | O_NONBLOCK);
+    stream_ = std::make_unique<boost::asio::posix::stream_descriptor>(ioc_, fd);
+    on_connect();
 }
-
-
-void PipeStream::worker()
-{
-    timeval tvChunk;
-    std::unique_ptr<msg::PcmChunk> chunk(new msg::PcmChunk(sampleFormat_, pcmReadMs_));
-    string lastException = "";
-
-    while (active_)
-    {
-        if (fd_ != -1)
-            close(fd_);
-        fd_ = open(uri_.path.c_str(), O_RDONLY | O_NONBLOCK);
-        chronos::systemtimeofday(&tvChunk);
-        tvEncodedChunk_ = tvChunk;
-        long nextTick = chronos::getTickCount();
-        int idleBytes = 0;
-        int maxIdleBytes = sampleFormat_.rate * sampleFormat_.frameSize * dryoutMs_ / 1000;
-        try
-        {
-            if (fd_ == -1)
-                throw SnapException("failed to open fifo: \"" + uri_.path + "\"");
-
-            while (active_)
-            {
-                chunk->timestamp.sec = tvChunk.tv_sec;
-                chunk->timestamp.usec = tvChunk.tv_usec;
-                int toRead = chunk->payloadSize;
-                int len = 0;
-                do
-                {
-                    int count = read(fd_, chunk->payload + len, toRead - len);
-                    if (count < 0 && idleBytes < maxIdleBytes)
-                    {
-                        memset(chunk->payload + len, 0, toRead - len);
-                        idleBytes += toRead - len;
-                        len += toRead - len;
-                        continue;
-                    }
-                    if (count < 0)
-                    {
-                        setState(kIdle);
-                        if (!sleep(100))
-                            break;
-                    }
-                    else if (count == 0)
-                        throw SnapException("end of file");
-                    else
-                    {
-                        len += count;
-                        idleBytes = 0;
-                    }
-                } while ((len < toRead) && active_);
-
-                if (!active_)
-                    break;
-
-                /// TODO: use less raw pointers, make this encoding more transparent
-                encoder_->encode(chunk.get());
-
-                if (!active_)
-                    break;
-
-                nextTick += pcmReadMs_;
-                chronos::addUs(tvChunk, pcmReadMs_ * 1000);
-                long currentTick = chronos::getTickCount();
-
-                if (nextTick >= currentTick)
-                {
-                    setState(kPlaying);
-                    if (!sleep(nextTick - currentTick))
-                        break;
-                }
-                else
-                {
-                    chronos::systemtimeofday(&tvChunk);
-                    tvEncodedChunk_ = tvChunk;
-                    pcmListener_->onResync(this, currentTick - nextTick);
-                    nextTick = currentTick;
-                }
-
-                lastException = "";
-            }
-        }
-        catch (const std::exception& e)
-        {
-            if (lastException != e.what())
-            {
-                LOG(ERROR) << "(PipeStream) Exception: " << e.what() << std::endl;
-                lastException = e.what();
-            }
-            if (!sleep(100))
-                break;
-        }
-    }
 }

@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@
 #include "common/aixlog.hpp"
 #include "common/snap_exception.hpp"
 #include "common/str_compat.hpp"
+#include "message/factory.hpp"
 #include "message/hello.hpp"
 #include <iostream>
 #include <mutex>
@@ -32,6 +33,8 @@ ClientConnection::ClientConnection(MessageReceiver* receiver, const std::string&
     : socket_(io_context_), active_(false), messageReceiver_(receiver), reqId_(1), host_(host), port_(port), readerThread_(nullptr),
       sumTimeout_(chronos::msec(0))
 {
+    base_msg_size_ = base_message_.getSize();
+    buffer_.resize(base_msg_size_);
 }
 
 
@@ -39,7 +42,6 @@ ClientConnection::~ClientConnection()
 {
     stop();
 }
-
 
 
 void ClientConnection::socketRead(void* _to, size_t _bytes)
@@ -81,7 +83,7 @@ void ClientConnection::start()
     SLOG(NOTICE) << "Connected to " << socket_.remote_endpoint().address().to_string() << endl;
     active_ = true;
     sumTimeout_ = chronos::msec(0);
-    readerThread_ = new thread(&ClientConnection::reader, this);
+    readerThread_ = make_unique<thread>(&ClientConnection::reader, this);
 }
 
 
@@ -101,7 +103,6 @@ void ClientConnection::stop()
         {
             LOG(DEBUG) << "joining readerThread\n";
             readerThread_->join();
-            delete readerThread_;
         }
     }
     catch (...)
@@ -130,21 +131,24 @@ bool ClientConnection::send(const msg::BaseMessage* message)
 }
 
 
-shared_ptr<msg::SerializedMessage> ClientConnection::sendRequest(const msg::BaseMessage* message, const chronos::msec& timeout)
+
+unique_ptr<msg::BaseMessage> ClientConnection::sendRequest(const msg::BaseMessage* message, const chronos::msec& timeout)
 {
-    shared_ptr<msg::SerializedMessage> response(nullptr);
+    unique_ptr<msg::BaseMessage> response(nullptr);
     if (++reqId_ >= 10000)
         reqId_ = 1;
     message->id = reqId_;
     //	LOG(INFO) << "Req: " << message->id << "\n";
-    shared_ptr<PendingRequest> pendingRequest(new PendingRequest(reqId_));
+    shared_ptr<PendingRequest> pendingRequest = make_shared<PendingRequest>(reqId_);
 
-    std::unique_lock<std::mutex> lock(pendingRequestsMutex_);
-    pendingRequests_.insert(pendingRequest);
-    send(message);
-    if (pendingRequest->cv.wait_for(lock, std::chrono::milliseconds(timeout)) == std::cv_status::no_timeout)
+    { // scope for lock
+        std::unique_lock<std::mutex> lock(pendingRequestsMutex_);
+        pendingRequests_.insert(pendingRequest);
+        send(message);
+    }
+
+    if ((response = pendingRequest->waitForResponse(std::chrono::milliseconds(timeout))) != nullptr)
     {
-        response = pendingRequest->response;
         sumTimeout_ = chronos::msec(0);
         //		LOG(INFO) << "Resp: " << pendingRequest->id << "\n";
     }
@@ -155,52 +159,45 @@ shared_ptr<msg::SerializedMessage> ClientConnection::sendRequest(const msg::Base
         if (sumTimeout_ > chronos::sec(10))
             throw SnapException("sum timeout exceeded 10s");
     }
-    pendingRequests_.erase(pendingRequest);
+
+    { // scope for lock
+        std::unique_lock<std::mutex> lock(pendingRequestsMutex_);
+        pendingRequests_.erase(pendingRequest);
+    }
     return response;
 }
 
 
 void ClientConnection::getNextMessage()
 {
-    msg::BaseMessage baseMessage;
-    size_t baseMsgSize = baseMessage.getSize();
-    vector<char> buffer(baseMsgSize);
-    socketRead(&buffer[0], baseMsgSize);
-    baseMessage.deserialize(&buffer[0]);
-    //	LOG(DEBUG) << "getNextMessage: " << baseMessage.type << ", size: " << baseMessage.size << ", id: " << baseMessage.id << ", refers: " <<
-    // baseMessage.refersTo << "\n";
-    if (baseMessage.size > buffer.size())
-        buffer.resize(baseMessage.size);
+    socketRead(&buffer_[0], base_msg_size_);
+    base_message_.deserialize(buffer_.data());
+    // LOG(DEBUG) << "getNextMessage: " << base_message_.type << ", size: " << base_message_.size << ", id: " << base_message_.id
+    //            << ", refers: " << base_message_.refersTo << "\n";
+    if (base_message_.size > buffer_.size())
+        buffer_.resize(base_message_.size);
     //	{
     //		std::lock_guard<std::mutex> socketLock(socketMutex_);
-    socketRead(&buffer[0], baseMessage.size);
-    //	}
+    socketRead(buffer_.data(), base_message_.size);
     tv t;
-    baseMessage.received = t;
+    base_message_.received = t;
+    //	}
 
-    {
+    { // scope for lock
         std::unique_lock<std::mutex> lock(pendingRequestsMutex_);
-        //		LOG(DEBUG) << "got lock - getNextMessage: " << baseMessage.type << ", size: " << baseMessage.size << ", id: " << baseMessage.id << ",
-        // refers: " << baseMessage.refersTo << "\n";
+        for (auto req : pendingRequests_)
         {
-            for (auto req : pendingRequests_)
+            if (req->id() == base_message_.refersTo)
             {
-                if (req->id == baseMessage.refersTo)
-                {
-                    req->response.reset(new msg::SerializedMessage());
-                    req->response->message = baseMessage;
-                    req->response->buffer = (char*)malloc(baseMessage.size);
-                    memcpy(req->response->buffer, &buffer[0], baseMessage.size);
-                    lock.unlock();
-                    req->cv.notify_one();
-                    return;
-                }
+                auto response = msg::factory::createMessage(base_message_, buffer_.data());
+                req->setValue(std::move(response));
+                return;
             }
         }
     }
 
     if (messageReceiver_ != nullptr)
-        messageReceiver_->onMessageReceived(this, baseMessage, &buffer[0]);
+        messageReceiver_->onMessageReceived(this, base_message_, buffer_.data());
 }
 
 
@@ -214,13 +211,10 @@ void ClientConnection::reader()
             getNextMessage();
         }
     }
-    catch (const std::exception& e)
-    {
-        if (messageReceiver_ != nullptr)
-            messageReceiver_->onException(this, make_shared<SnapException>(e.what()));
-    }
     catch (...)
     {
+        if (messageReceiver_ != nullptr)
+            messageReceiver_->onException(this, std::current_exception());
     }
     active_ = false;
 }

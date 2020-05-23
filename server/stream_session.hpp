@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,8 +16,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifndef STREAM_SESSION_H
-#define STREAM_SESSION_H
+#ifndef STREAM_SESSION_HPP
+#define STREAM_SESSION_HPP
 
 #include "common/queue.h"
 #include "message/message.hpp"
@@ -27,11 +27,9 @@
 #include <condition_variable>
 #include <deque>
 #include <memory>
-#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 
@@ -51,26 +49,32 @@ public:
 
 
 // A reference-counted non-modifiable buffer class.
-// TODO: add overload for messages
 class shared_const_buffer
 {
-public:
-    // Construct from a std::string.
-    explicit shared_const_buffer(const std::string& data) : data_(new std::vector<char>(data.begin(), data.end())), buffer_(boost::asio::buffer(*data_))
+    struct Message
     {
+        std::vector<char> data;
+        bool is_pcm_chunk;
+        chronos::time_point_clk rec_time;
+    };
+
+public:
+    shared_const_buffer(msg::BaseMessage& message) : on_air(false)
+    {
+        tv t;
+        message.sent = t;
+        const msg::PcmChunk* pcm_chunk = dynamic_cast<const msg::PcmChunk*>(&message);
+        message_ = std::make_shared<Message>();
+        message_->is_pcm_chunk = (pcm_chunk != nullptr);
+        if (message_->is_pcm_chunk)
+            message_->rec_time = pcm_chunk->start();
+
+        std::ostringstream oss;
+        message.serialize(oss);
+        std::string s = oss.str();
+        message_->data = std::vector<char>(s.begin(), s.end());
+        buffer_ = boost::asio::buffer(message_->data);
     }
-
-    // // Construct from a message.
-    // explicit shared_const_buffer(const msg::BaseMessage& message)
-    // {
-    //     std::ostringstream oss;
-    //     message.serialize(oss);
-
-    //     data_ = std::shared_ptr<std::vector<char>>(new std::vector<char>(oss.str().begin(), oss.str().end()));
-    //     //std::make_shared<std::vector<char>>(oss.str().begin(), oss.str().end());
-    //     buffer_ = boost::asio::buffer(*data_);
-    // }
-
 
     // Implement the ConstBufferSequence requirements.
     typedef boost::asio::const_buffer value_type;
@@ -79,13 +83,21 @@ public:
     {
         return &buffer_;
     }
+
     const boost::asio::const_buffer* end() const
     {
         return &buffer_ + 1;
     }
 
+    const Message& message() const
+    {
+        return *message_;
+    }
+
+    bool on_air;
+
 private:
-    std::shared_ptr<std::vector<char>> data_;
+    std::shared_ptr<Message> message_;
     boost::asio::const_buffer buffer_;
 };
 
@@ -121,8 +133,8 @@ public:
         return socket_.remote_endpoint().address().to_string();
     }
 
-    void setPcmStream(PcmStreamPtr pcmStream);
-    const PcmStreamPtr pcmStream() const;
+    void setPcmStream(streamreader::PcmStreamPtr pcmStream);
+    const streamreader::PcmStreamPtr pcmStream() const;
 
 protected:
     void read_next();
@@ -134,7 +146,7 @@ protected:
     tcp::socket socket_;
     MessageReceiver* messageReceiver_;
     size_t bufferMs_;
-    PcmStreamPtr pcmStream_;
+    streamreader::PcmStreamPtr pcmStream_;
     boost::asio::io_context::strand strand_;
     std::deque<shared_const_buffer> messages_;
 };

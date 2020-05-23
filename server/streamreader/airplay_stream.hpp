@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,8 +16,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifndef AIRPLAY_STREAM_H
-#define AIRPLAY_STREAM_H
+#ifndef AIRPLAY_STREAM_HPP
+#define AIRPLAY_STREAM_HPP
 
 #include "process_stream.hpp"
 
@@ -28,6 +28,9 @@
 #ifdef HAS_EXPAT
 #include <expat.h>
 #endif
+
+namespace streamreader
+{
 
 class TageEntry
 {
@@ -56,30 +59,39 @@ class AirplayStream : public ProcessStream
 {
 public:
     /// ctor. Encoded PCM data is passed to the PipeListener
-    AirplayStream(PcmListener* pcmListener, const StreamUri& uri);
+    AirplayStream(PcmListener* pcmListener, boost::asio::io_context& ioc, const StreamUri& uri);
     ~AirplayStream() override;
 
 protected:
 #ifdef HAS_EXPAT
     XML_Parser parser_;
-#endif
     std::unique_ptr<TageEntry> entry_;
     std::string buf_;
-    json jtag_;
+    json metadata_;
+    /// set whenever metadata_ has changed
+    bool metadata_dirty_;
+#endif
 
-    void pipeReader();
+    void pipeReadLine();
 #ifdef HAS_EXPAT
     int parse(std::string line);
     void createParser();
     void push();
+    void setMetaData(const std::string& key, const std::string& newValue);
 #endif
 
-    void onStderrMsg(const char* buffer, size_t n) override;
+    void setParamsAndPipePathFromPort();
+
+    void do_connect() override;
+    void onStderrMsg(const std::string& line) override;
     void initExeAndPath(const std::string& filename) override;
+
     size_t port_;
     std::string pipePath_;
     std::string params_wo_port_;
-    std::thread pipeReaderThread_;
+    std::unique_ptr<boost::asio::posix::stream_descriptor> pipe_fd_;
+    boost::asio::steady_timer pipe_open_timer_;
+    boost::asio::streambuf streambuf_pipe_;
 
 #ifdef HAS_EXPAT
     static void XMLCALL element_start(void* userdata, const char* element_name, const char** attr);
@@ -88,5 +100,6 @@ protected:
 #endif
 };
 
+} // namespace streamreader
 
 #endif

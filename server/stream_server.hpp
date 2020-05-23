@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,15 +16,14 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifndef STREAM_SERVER_H
-#define STREAM_SERVER_H
+#ifndef STREAM_SERVER_HPP
+#define STREAM_SERVER_HPP
 
 #include <boost/asio.hpp>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <sstream>
-#include <thread>
 #include <vector>
 
 #include "common/queue.h"
@@ -38,6 +37,7 @@
 #include "stream_session.hpp"
 #include "streamreader/stream_manager.hpp"
 
+using namespace streamreader;
 
 using boost::asio::ip::tcp;
 using acceptor_ptr = std::unique_ptr<tcp::acceptor>;
@@ -51,7 +51,7 @@ using session_ptr = std::shared_ptr<StreamSession>;
  * Receives (via the MessageReceiver interface) and answers messages from the clients
  * Forwards PCM data to the clients
  */
-class StreamServer : public MessageReceiver, ControlMessageReceiver, PcmListener
+class StreamServer : public MessageReceiver, public ControlMessageReceiver, public PcmListener
 {
 public:
     StreamServer(boost::asio::io_context& io_context, const ServerSettings& serverSettings);
@@ -73,7 +73,7 @@ public:
     /// Implementation of PcmListener
     void onMetaChanged(const PcmStream* pcmStream) override;
     void onStateChanged(const PcmStream* pcmStream, const ReaderState& state) override;
-    void onChunkRead(const PcmStream* pcmStream, msg::PcmChunk* chunk, double duration) override;
+    void onChunkRead(const PcmStream* pcmStream, std::shared_ptr<msg::PcmChunk> chunk, double duration) override;
     void onResync(const PcmStream* pcmStream, double ms) override;
 
 private:
@@ -83,12 +83,16 @@ private:
     session_ptr getStreamSession(StreamSession* session) const;
     void ProcessRequest(const jsonrpcpp::request_ptr request, jsonrpcpp::entity_ptr& response, jsonrpcpp::notification_ptr& notification) const;
     void cleanup();
+    /// Save the server state deferred to prevent blocking and lower disk io
+    /// @param deferred the delay after the last call to saveConfig
+    void saveConfig(const std::chrono::milliseconds& deferred = std::chrono::seconds(2));
 
     mutable std::recursive_mutex sessionsMutex_;
     mutable std::recursive_mutex clientMutex_;
     std::vector<std::weak_ptr<StreamSession>> sessions_;
     boost::asio::io_context& io_context_;
     std::vector<acceptor_ptr> acceptor_;
+    boost::asio::steady_timer config_timer_;
 
     ServerSettings settings_;
     Queue<std::shared_ptr<msg::BaseMessage>> messages_;

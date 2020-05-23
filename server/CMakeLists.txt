@@ -12,7 +12,9 @@ set(SERVER_SOURCES
     streamreader/stream_uri.cpp
     streamreader/stream_manager.cpp
     streamreader/pcm_stream.cpp
+    streamreader/tcp_stream.cpp
     streamreader/pipe_stream.cpp
+    streamreader/posix_stream.cpp
     streamreader/file_stream.cpp
     streamreader/airplay_stream.cpp
     streamreader/librespot_stream.cpp
@@ -21,6 +23,7 @@ set(SERVER_SOURCES
 
 set(SERVER_LIBRARIES
     ${CMAKE_THREAD_LIBS_INIT}
+    ${ATOMIC_LIBRARY}
     common)
 
 set(SERVER_INCLUDE
@@ -64,6 +67,11 @@ if (OPUS_FOUND)
     list(APPEND SERVER_LIBRARIES ${OPUS_LIBRARIES})
     list(APPEND SERVER_INCLUDE ${OPUS_INCLUDE_DIRS})
 endif (OPUS_FOUND)
+
+if (EXPAT_FOUND)
+    list(APPEND SERVER_LIBRARIES ${EXPAT_LIBRARIES})
+    list(APPEND SERVER_INCLUDE ${EXPAT_INCLUDE_DIRS})
+endif (EXPAT_FOUND)
 
 #list(APPEND SERVER_LIBRARIES Boost::boost)
 

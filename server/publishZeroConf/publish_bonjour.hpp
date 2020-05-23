@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ class PublishBonjour;
 class PublishBonjour : public PublishmDNS
 {
 public:
-    PublishBonjour(const std::string& serviceName);
+    PublishBonjour(const std::string& serviceName, boost::asio::io_context& ioc);
     virtual ~PublishBonjour();
     virtual void publish(const std::vector<mDNSService>& services);
 

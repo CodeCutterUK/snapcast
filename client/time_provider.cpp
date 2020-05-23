@@ -1,6 +1,6 @@
 /***
     This file is part of snapcast
-    Copyright (C) 2014-2019  Johannes Pohl
+    Copyright (C) 2014-2020  Johannes Pohl
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
 
 TimeProvider::TimeProvider() : diffToServer_(0)
 {
-    diffBuffer_.setSize(200);
+    diffBuffer_.setSize(100);
 }
 
 
@@ -39,7 +39,7 @@ void TimeProvider::setDiffToServer(double ms)
 {
     static int32_t lastTimeSync = 0;
     timeval now;
-    chronos::systemtimeofday(&now);
+    chronos::steadytimeofday(&now);
 
     /// clear diffBuffer if last update is older than a minute
     if (!diffBuffer_.empty() && (std::abs(now.tv_sec - lastTimeSync) > 60))
@@ -51,8 +51,9 @@ void TimeProvider::setDiffToServer(double ms)
     lastTimeSync = now.tv_sec;
 
     diffBuffer_.add(ms * 1000);
-    diffToServer_ = diffBuffer_.median(3);
-    //	LOG(INFO) << "setDiffToServer: " << ms << ", diff: " << diffToServer_ / 1000.f << "\n";
+    diffToServer_ = diffBuffer_.median();
+    // LOG(INFO) << "setDiffToServer: " << ms << ", diff: " << diffToServer_ / 1000000 << " s, " << (diffToServer_ / 1000) % 1000 << "." << diffToServer_ % 1000
+    // << " ms\n";
 }
 
 /*
